@@ -22,7 +22,7 @@ Also read:
 
 If the required fields (see `workflow.yml → blocking.required_non_empty_fields`)
 are not filled in — **do not start work**. Run the *Bootstrap* procedure
-from section 2 of `AGENTS.md`: analyze the project, fill out YAML
+from `.workflow/bootstrap.md`: analyze the project, fill out YAML
 drafts, get user confirmation.
 
 ## Task cycle

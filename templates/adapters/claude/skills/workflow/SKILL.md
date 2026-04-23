@@ -14,7 +14,7 @@ a `.workflow/` directory.
    the required fields (the list is in
    `workflow.yml → blocking.required_non_empty_fields`). If any is empty,
    stop and run `/init-workflow`. During Bootstrap, pick the commit style
-   via the preset procedure in `AGENTS.md` §2.5, and ask for the commit
+   via the preset procedure in `.workflow/bootstrap.md`, and ask for the commit
    message language separately.
 
 2. **Task cycle.** Follow the cycle from section 3 of `AGENTS.md`:

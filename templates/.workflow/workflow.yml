@@ -81,7 +81,7 @@ history:
 
 blocking:
   # If any of these conditions is violated, the agent must stop work and
-  # start the initialization procedure (see AGENTS.md → Bootstrap).
+  # start the initialization procedure (see .workflow/bootstrap.md).
   block_if_configs_missing: true
   required_files:
     - .workflow/stack.yml
@@ -107,3 +107,14 @@ scope_control:                      # feature_id: scope_control — see .workflo
   no_unrelated_refactors: true
   no_unrequested_dependencies: true
   ask_before_destructive: true   # deletions, force-push, migrations
+
+git:
+  three_branch_model:               # feature_id: three_branch_model — see .workflow/presets.yml
+    enabled: false
+    branches:
+      main: main                    # production / release
+      stage: stage                  # pre-production / QA
+      dev: dev                      # default integration branch
+    default_working_branch: dev     # branch from which feature branches are cut
+    create_during_bootstrap: true   # if enabled and branches missing, bootstrap creates them locally
+    push_during_bootstrap: false    # never push without asking the user

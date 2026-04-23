@@ -34,6 +34,7 @@ presets:
       light_tdd: false
       granular_commits: false
       scope_control: true
+      three_branch_model: false
 
   medium:
     label: "Medium — balanced"
@@ -47,6 +48,7 @@ presets:
       light_tdd: false
       granular_commits: true
       scope_control: true
+      three_branch_model: true
 
   full:
     label: "Full — complete workflow"
@@ -61,6 +63,7 @@ presets:
       light_tdd: true
       granular_commits: true
       scope_control: true
+      three_branch_model: true
 
 # Feature registry. Each entry = one customizable step of the workflow.
 # `defaults` gives the on/off state per preset.
@@ -115,3 +118,12 @@ features:
       - "workflow.yml → scope_control.ask_before_destructive"
     question: "Keep scope-control guardrails on (recommended)?"
     defaults: { fast: true, medium: true, full: true }
+
+  - id: three_branch_model
+    description: "Maintain main / stage / dev branches in the repo."
+    controls:
+      - "workflow.yml → git.three_branch_model.enabled"
+      - "conventions.yml → branches.model"
+      - "conventions.yml → branches.protected"
+    question: "Maintain a main / stage / dev branch layout in this repo?"
+    defaults: { fast: false, medium: true, full: true }

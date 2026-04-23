@@ -28,7 +28,7 @@ tests:
 
 commits:
   # During /init-workflow the agent offers one of the named presets below
-  # and fills the whole block from it. See AGENTS.md §2.2 for full definitions
+  # and fills the whole block from it. See .workflow/bootstrap.md for full definitions
   # and examples. Preset choice and message language are independent: any
   # preset works with any language.
   #
@@ -52,9 +52,12 @@ commits:
   emoji_map: {}
 
 branches:
-  default: ""              # main | master | trunk
+  default: ""              # main | master | trunk (single-branch repos)
   style: ""                # feature/<slug> | <ticket>-<slug>
   protected: []
+  # Populated when workflow.yml → git.three_branch_model.enabled is true.
+  model: ""                # "" | three-branch
+  flow: ""                 # e.g. "feature → dev → stage → main"
 
 review_checklist:
   # What to check before considering a task done.

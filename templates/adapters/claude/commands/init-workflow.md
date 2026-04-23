@@ -2,14 +2,14 @@
 description: Initialize or complete .workflow/*.yml for this project
 ---
 
-Perform the **Bootstrap** procedure from `AGENTS.md` (section 2).
+Perform the **Bootstrap** procedure from `.workflow/bootstrap.md`.
 
 In short:
 
 1. Read `.workflow/presets.yml` to load the preset definitions and the
    feature registry. This file is the source of truth for *which* process
    features exist and *how* each preset configures them.
-2. **Ask the user which workflow preset to use** (AGENTS.md §2.0). Show the
+2. **Ask the user which workflow preset to use**. Show the
    `label` and `description` of each preset verbatim:
    - `fast` — plan-only, no options / no TDD / no granular commits.
    - `medium` — balanced (options + granular commits, no TDD). **Recommend
@@ -29,7 +29,7 @@ In short:
    and `.workflow/conventions.yml`. Leave fields empty when there is not
    enough evidence and mark them with `# TODO: confirm`.
 7. For `conventions.yml → commits`, run the **Commit convention preset**
-   procedure from `AGENTS.md` §2.5: show the four named presets
+   procedure from `.workflow/bootstrap.md`: show the four named presets
    (`conventional`, `gitmoji`, `emoji-prefix`, `free-form`) plus `custom`;
    recommend one based on `git log --oneline -n 100` if there is a clear
    match, otherwise recommend `conventional`; then ask a separate question
@@ -49,4 +49,4 @@ Do not start any other work until the required fields from
 
 **Note for future features.** Do **not** hardcode feature questions in this
 file. The procedure above iterates `.workflow/presets.yml → features:`. To
-add a new customizable step, append an entry there (see AGENTS.md §2.6).
+add a new customizable step, append an entry there (see `.workflow/bootstrap.md`).

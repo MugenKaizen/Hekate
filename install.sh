@@ -53,6 +53,50 @@ log()  { printf '[aaw] %s\n' "$*"; }
 warn() { printf '[aaw] WARN: %s\n' "$*" >&2; }
 die()  { printf '[aaw] ERROR: %s\n' "$*" >&2; exit 1; }
 
+write_state_file() {
+  state_file="$TARGET/.workflow/state.yml"
+  timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "would write install state: $state_file"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$state_file")"
+  {
+    printf 'install:\n'
+    printf '  tool: hekate\n'
+    printf '  installed_repo: %s\n' "$REPO"
+    printf '  installed_ref: %s\n' "$REF"
+    printf '  installed_at: %s\n' "$timestamp"
+    printf '  adapters:\n'
+
+    old_ifs="$IFS"
+    IFS=','
+    set -- $AGENTS
+    IFS="$old_ifs"
+
+    for agent in "$@"; do
+      [ -n "$agent" ] || continue
+      printf '    - %s\n' "$agent"
+    done
+
+    printf 'schema:\n'
+    printf '  state_version: 2\n'
+    if [ -d "$SRC_ROOT/migrations" ] && ls "$SRC_ROOT/migrations/"*.sh >/dev/null 2>&1; then
+      printf '  applied_migrations:\n'
+      for migration_file in "$SRC_ROOT"/migrations/*.sh; do
+        [ -e "$migration_file" ] || continue
+        printf '    - %s\n' "$(basename "$migration_file" .sh)"
+      done
+    else
+      printf '  applied_migrations: []\n'
+    fi
+  } > "$state_file"
+
+  log "updated: $state_file"
+}
+
 do_copy() {
   # copy $1 -> $2 unless exists (or --force). Creates parent dirs.
   src="$1"
@@ -153,6 +197,7 @@ do_copy "$TPL/.workflow/architecture.yml" "$TARGET/.workflow/architecture.yml"
 do_copy "$TPL/.workflow/conventions.yml"  "$TARGET/.workflow/conventions.yml"
 do_copy "$TPL/.workflow/workflow.yml"     "$TARGET/.workflow/workflow.yml"
 do_copy "$TPL/.workflow/presets.yml"      "$TARGET/.workflow/presets.yml"
+do_copy "$TPL/.workflow/bootstrap.md"     "$TARGET/.workflow/bootstrap.md"
 do_copy "$TPL/.workflow/README.md"        "$TARGET/.workflow/README.md"
 do_copy "$TPL/.workflow/history/.gitkeep" "$TARGET/.workflow/history/.gitkeep"
 
@@ -180,6 +225,7 @@ fi
 
 # --- gitignore -----------------------------------------------------------
 append_gitignore "$TPL/gitignore.snippet"
+write_state_file
 
 # --- final message -------------------------------------------------------
 cat <<EOF
@@ -188,9 +234,13 @@ cat <<EOF
  ai_agent_workflow installed.
 
  Next step:
-   1. Open the project in your AI agent (Claude Code / Cursor / Codex / …).
-   2. Ask: "initialize the workflow" (or /init-workflow in Claude).
-   3. The agent will analyze the project and fill out .workflow/*.yml.
+    1. Open the project in your AI agent (Claude Code / Cursor / Codex / …).
+    2. Ask: "initialize the workflow" (or /init-workflow in Claude).
+    3. The agent will analyze the project and fill out .workflow/*.yml.
+
+  To update an existing installation later:
+    curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
+      | sh -s -- --target=/path/to/project
 
  Until the required fields are filled in, the agent will NOT work — this is by design.
 ─────────────────────────────────────────────────────────
