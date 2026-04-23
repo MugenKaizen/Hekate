@@ -1,0 +1,52 @@
+---
+description: Initialize or complete .workflow/*.yml for this project
+---
+
+Perform the **Bootstrap** procedure from `AGENTS.md` (section 2).
+
+In short:
+
+1. Read `.workflow/presets.yml` to load the preset definitions and the
+   feature registry. This file is the source of truth for *which* process
+   features exist and *how* each preset configures them.
+2. **Ask the user which workflow preset to use** (AGENTS.md §2.0). Show the
+   `label` and `description` of each preset verbatim:
+   - `fast` — plan-only, no options / no TDD / no granular commits.
+   - `medium` — balanced (options + granular commits, no TDD). **Recommend
+     this as the default.**
+   - `full` — everything on, including light TDD (strict-lite).
+   - `custom` — iterate `presets.yml → features:` and ask each feature's
+     `question` one by one.
+3. Apply the chosen preset (or custom answers) to `.workflow/workflow.yml`
+   by writing to the paths listed in each feature's `controls:`. For
+   features disabled by the chosen preset, **do not** ask further questions
+   about them later in the interview. For features with a `when_enabled_mode`,
+   use that value whenever the feature is enabled.
+4. Determine whether this is a new or an existing project.
+5. For an existing project, analyze dependency manifests, linter configs,
+   directory structure, CI, Dockerfile, README, and commit history.
+6. Fill out drafts of `.workflow/stack.yml`, `.workflow/architecture.yml`,
+   and `.workflow/conventions.yml`. Leave fields empty when there is not
+   enough evidence and mark them with `# TODO: confirm`.
+7. For `conventions.yml → commits`, run the **Commit convention preset**
+   procedure from `AGENTS.md` §2.5: show the four named presets
+   (`conventional`, `gitmoji`, `emoji-prefix`, `free-form`) plus `custom`;
+   recommend one based on `git log --oneline -n 100` if there is a clear
+   match, otherwise recommend `conventional`; then ask a separate question
+   about the commit message language and write the answer into
+   `commits.language` verbatim.
+8. Show the user one file at a time and wait for confirmation.
+9. Write `meta.active_preset` to `.workflow/presets.yml` and mirror it to
+   `.workflow/workflow.yml → meta.preset`.
+10. After writing all YAML files, create
+    `.workflow/history/<date>-bootstrap.md` with the chosen preset, the
+    resolved feature map, and any assumptions.
+11. Make sure `.workflow/history/` is in `.gitignore`.
+
+Do not start any other work until the required fields from
+`workflow.yml → blocking.required_non_empty_fields` are filled in and
+`presets.yml → meta.active_preset` is not `null`.
+
+**Note for future features.** Do **not** hardcode feature questions in this
+file. The procedure above iterates `.workflow/presets.yml → features:`. To
+add a new customizable step, append an entry there (see AGENTS.md §2.6).

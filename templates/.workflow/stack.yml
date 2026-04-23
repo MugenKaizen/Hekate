@@ -1,0 +1,54 @@
+# The project's technology stack.
+# Filled in once at initialization. The agent reads this file before any
+# work and refuses to act if key fields are empty.
+#
+# Rule: if the exact value is unknown, leave the field empty and run the
+# initialization wizard. Don't make things up.
+
+meta:
+  project_name: ""         # the project's name
+  project_kind: ""         # web-app | cli | library | service | mobile | monorepo | other
+  description: ""          # 1–2 lines: what the project does
+
+languages:
+  # List of languages with versions. Example:
+  # - name: python
+  #   version: "3.12"
+  #   package_manager: uv
+  []
+
+runtimes:
+  # - name: node
+  #   version: "20"
+  []
+
+frameworks:
+  backend: []              # e.g. fastapi, django, express, gin
+  frontend: []             # e.g. react, vue, svelte, next
+  testing: []              # e.g. pytest, vitest, jest, go test
+
+datastores:
+  primary: ""              # e.g. postgres 16
+  cache: ""                # e.g. redis 7
+  search: ""               # e.g. meilisearch, opensearch
+  other: []
+
+infra:
+  containerization: ""     # docker | podman | none
+  orchestration: ""        # k8s | docker-compose | nomad | none
+  ci: ""                   # github-actions | gitlab-ci | circleci | none
+  hosting: ""              # aws | gcp | fly.io | self-hosted | other
+
+external_services:
+  # What the project uses externally. Affects architectural decisions and tests.
+  # - name: stripe
+  #   purpose: payments
+  []
+
+build_and_run:
+  install: ""              # single command to install dependencies
+  dev: ""                  # start the dev environment
+  test: ""                 # run tests
+  lint: ""                 # run the linter
+  format: ""               # run the formatter
+  build: ""                # production build
