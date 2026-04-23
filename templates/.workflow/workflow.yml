@@ -1,0 +1,109 @@
+# Rules for the agent's working process.
+# This file controls HOW the agent works: when it blocks, which stages are
+# mandatory, what gets written to history. Read together with AGENTS.md.
+#
+# Process features below (require_options, light_tdd, granular_commits,
+# scope_control, ...) are declared in `.workflow/presets.yml`. During
+# bootstrap, a preset (fast / medium / full) or a custom selection fills the
+# corresponding fields here. To add a new customizable feature, edit
+# `.workflow/presets.yml → features:` — do not hardcode it in AGENTS.md.
+
+meta:
+  # Filled by /init-workflow. Mirrors .workflow/presets.yml → meta.active_preset.
+  # Values: fast | medium | full | custom | null (not initialized).
+  preset: null
+
+process:
+  # Every non-trivial task goes through these stages in this order.
+  # Trivial ones (typos, single-line edits) may skip options and go straight to plan.
+  require_analysis: true            # feature_id: require_analysis — see .workflow/presets.yml
+  require_options:                  # feature_id: require_options — see .workflow/presets.yml
+    enabled: true
+    min_count: 2           # at least 2 options with pros/cons
+    require_pros_cons: true
+    skip_for_trivial: true
+  plan:                             # feature_id: require_plan — see .workflow/presets.yml
+    required: true
+    must_be_self_contained: true   # the plan must run in a new session without additional context
+    must_include:
+      - "context: why the task is being done"
+      - "affected files with paths"
+      - "step-by-step actions"
+      - "how to verify the result"
+      - "checkpoint checklist for large tasks when granular commits apply"
+    location: .workflow/history/
+  light_tdd:                        # feature_id: light_tdd — see .workflow/presets.yml
+    enabled: true
+    mode: strict-lite      # strict-lite | soft | off
+    ask_during_bootstrap: true
+    applies_to: "non-trivial behavior changes"
+    skip_for:
+      - "trivial changes"
+      - "documentation-only changes"
+      - "configuration-only changes"
+      - "purely mechanical edits"
+    require_explicit_exception: true
+    exception_note_location:
+      - analysis
+      - plan
+    prefer_targeted_test_run_before_impl: true
+    require_test_immediately_after_exception: true
+  granular_commits:                 # feature_id: granular_commits — see .workflow/presets.yml
+    enabled: true
+    ask_during_bootstrap: true
+    mode: auto             # auto | ask
+    applies_to: "large tasks with 2+ independently verifiable checkpoints"
+    large_task_definition:
+      min_checkpoints: 2
+      require_independent_verification: true
+    require_checkpoint_checklist: true
+    checklist_location: ".workflow/history/{date}-{slug}.md"
+    commit_after: "verified checkpoint"
+    require_commit_message_in_checklist: true
+
+history:
+  enabled: true
+  markdown_per_task:
+    enabled: true
+    path_pattern: ".workflow/history/{date}-{slug}.md"
+    sections:
+      - analysis
+      - options
+      - plan
+      - checkpoint_checklist
+      - result
+  events_jsonl:
+    enabled: true
+    path: ".workflow/history/events.jsonl"
+    # Each event: {ts, task_slug, type, summary}
+    # type: started | analyzed | options_proposed | planned | checkpoint_completed |
+    #       checkpoint_committed | executed | verified | blocked
+
+blocking:
+  # If any of these conditions is violated, the agent must stop work and
+  # start the initialization procedure (see AGENTS.md → Bootstrap).
+  block_if_configs_missing: true
+  required_files:
+    - .workflow/stack.yml
+    - .workflow/architecture.yml
+    - .workflow/conventions.yml
+    - .workflow/workflow.yml
+    - .workflow/presets.yml
+  required_non_empty_fields:
+    stack.yml: [meta.project_name, meta.project_kind, languages]
+    architecture.yml: [style, layers]
+    conventions.yml: [code_style.formatter, naming.files, commits.style]
+
+bootstrap:
+  # Behavior of the initialization wizard.
+  new_project:
+    ask_user: true         # ask questions about stack/architecture/conventions/workflow rules
+  existing_project:
+    analyze_first: true    # first analyze the repo (manifests, structure)
+    confirm_with_user: true
+
+scope_control:                      # feature_id: scope_control — see .workflow/presets.yml
+  # Guardrails against "extra" actions.
+  no_unrelated_refactors: true
+  no_unrequested_dependencies: true
+  ask_before_destructive: true   # deletions, force-push, migrations

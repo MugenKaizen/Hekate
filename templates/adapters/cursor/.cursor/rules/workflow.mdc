@@ -1,0 +1,57 @@
+---
+description: Mandatory working process — before any task, read AGENTS.md and .workflow/*.yml
+globs: **/*
+alwaysApply: true
+---
+
+# Workflow
+
+This project uses **`AGENTS.md`** (in the repository root) as the single
+source of truth for all AI agents. Read it in full before doing any work.
+
+Also read:
+
+- `.workflow/stack.yml` — technology stack
+- `.workflow/architecture.yml` — architecture, layers, dependency rules
+- `.workflow/conventions.yml` — code style, naming, tests, commits
+- `.workflow/workflow.yml` — rules for how the agent works
+- `.workflow/presets.yml` — workflow preset (fast / medium / full / custom)
+  and the registry of customizable process features
+
+## Blocking
+
+If the required fields (see `workflow.yml → blocking.required_non_empty_fields`)
+are not filled in — **do not start work**. Run the *Bootstrap* procedure
+from section 2 of `AGENTS.md`: analyze the project, fill out YAML
+drafts, get user confirmation.
+
+## Task cycle
+
+The required stages for this project depend on the active preset in
+`presets.yml → meta.active_preset`. Respect the flags in `workflow.yml`:
+only stages whose feature is enabled are mandatory.
+
+Typical full cycle: **Analyze → Options (≥2, with pros/cons) →
+Plan (self-contained, in `.workflow/history/`) → Execute → Verify**.
+
+If `workflow.yml → process.light_tdd.enabled: true`, apply light TDD for
+non-trivial behavior changes. Default mode is `strict-lite`: add or update a
+focused test first unless there is a clear, explicitly stated reason not to.
+
+If `workflow.yml → process.granular_commits` is enabled and the task is large,
+the plan must include a checkpoint checklist in `.workflow/history/`. After
+each verified checkpoint, create a commit automatically or ask first,
+depending on `process.granular_commits.mode`.
+
+Details are in section 3 of `AGENTS.md`.
+
+## History
+
+- `.workflow/history/YYYY-MM-DD-<slug>.md` per task (analysis / options / plan / checkpoint checklist / result).
+- `.workflow/history/events.jsonl` — a structured event log.
+
+## Scope
+
+Don't do unrequested refactors, don't add dependencies without
+discussion, and perform destructive actions only with explicit
+confirmation.

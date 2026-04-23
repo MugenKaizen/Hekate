@@ -1,0 +1,117 @@
+# Process feature registry and preset definitions.
+#
+# Purpose:
+#   - Declare the named workflow presets (fast / medium / full) and which
+#     process features each one enables.
+#   - Declare the full list of customizable process features in a single
+#     registry. Every entry is automatically picked up by /init-workflow,
+#     both for preset application and for the "custom" (detailed) mode.
+#
+# To add a new customizable workflow feature in the future:
+#   1. Append an entry to `features:` below with a unique `id`.
+#   2. Choose defaults for each preset (`fast`, `medium`, `full`).
+#   3. If the feature needs runtime settings, add the matching block in
+#      `.workflow/workflow.yml` at the path named in `controls`.
+#   4. That's it — /init-workflow and AGENTS.md do NOT need to be edited.
+#      Bootstrap iterates this registry and asks / applies accordingly.
+
+meta:
+  # Filled during bootstrap: fast | medium | full | custom.
+  # `null` means the workflow has not been initialized yet.
+  active_preset: null
+
+presets:
+  fast:
+    label: "Fast — minimal process, plan only"
+    description: >
+      Brief analyze + written plan. No options comparison, no TDD,
+      no granular checkpoint commits. Best for prototypes, spikes,
+      and solo exploratory work.
+    features:
+      require_analysis: true
+      require_plan: true
+      require_options: false
+      light_tdd: false
+      granular_commits: false
+      scope_control: true
+
+  medium:
+    label: "Medium — balanced"
+    description: >
+      Analyze + options comparison + plan + granular checkpoint commits.
+      No mandatory TDD. Good default for most feature work.
+    features:
+      require_analysis: true
+      require_plan: true
+      require_options: true
+      light_tdd: false
+      granular_commits: true
+      scope_control: true
+
+  full:
+    label: "Full — complete workflow"
+    description: >
+      All stages mandatory, including light TDD (strict-lite) for
+      non-trivial behavior changes. Best for production codebases and
+      teams that want the strongest guardrails.
+    features:
+      require_analysis: true
+      require_plan: true
+      require_options: true
+      light_tdd: true
+      granular_commits: true
+      scope_control: true
+
+# Feature registry. Each entry = one customizable step of the workflow.
+# `defaults` gives the on/off state per preset.
+# `controls` names the path(s) in .workflow/workflow.yml that this feature
+# writes to when the bootstrap applies a preset or custom answers.
+# `question` is used verbatim in "custom" bootstrap mode.
+features:
+  - id: require_analysis
+    description: "Mandatory Analyze stage (AGENTS.md §3.1) before any work."
+    controls:
+      - "workflow.yml → process.require_analysis"
+    question: "Require an explicit Analyze stage before coding?"
+    defaults: { fast: true, medium: true, full: true }
+
+  - id: require_plan
+    description: "Mandatory self-contained plan file written to .workflow/history/."
+    controls:
+      - "workflow.yml → process.plan.required"
+    question: "Require a written, self-contained plan file per task?"
+    defaults: { fast: true, medium: true, full: true }
+
+  - id: require_options
+    description: "Require 2+ solution options with pros/cons before planning."
+    controls:
+      - "workflow.yml → process.require_options.enabled"
+    question: "Require comparing multiple solution options before planning?"
+    defaults: { fast: false, medium: true, full: true }
+
+  - id: light_tdd
+    description: "Light TDD (strict-lite) for non-trivial behavior changes."
+    controls:
+      - "workflow.yml → process.light_tdd.enabled"
+      - "workflow.yml → process.light_tdd.mode"
+    question: "Enable light TDD (test-first for behavior changes)?"
+    defaults: { fast: false, medium: false, full: true }
+    when_enabled_mode: strict-lite
+
+  - id: granular_commits
+    description: "Split large tasks into verified-checkpoint commits."
+    controls:
+      - "workflow.yml → process.granular_commits.enabled"
+      - "workflow.yml → process.granular_commits.mode"
+    question: "Enable granular checkpoint commits for large tasks?"
+    defaults: { fast: false, medium: true, full: true }
+    when_enabled_mode: auto
+
+  - id: scope_control
+    description: "Guardrails: no unrelated refactors, ask before destructive actions."
+    controls:
+      - "workflow.yml → scope_control.no_unrelated_refactors"
+      - "workflow.yml → scope_control.no_unrequested_dependencies"
+      - "workflow.yml → scope_control.ask_before_destructive"
+    question: "Keep scope-control guardrails on (recommended)?"
+    defaults: { fast: true, medium: true, full: true }

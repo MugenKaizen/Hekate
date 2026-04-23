@@ -1,0 +1,56 @@
+# The project's chosen architecture.
+# The agent must respect the boundaries and dependency rules described here.
+# When proposing solutions, check whether an option violates these invariants,
+# and explicitly call it out in the "cons" section.
+
+style: ""                  # clean | hexagonal | ddd | mvc | layered | modular-monolith | microservices | other
+style_notes: ""            # why this style was chosen and which decisions it dictates
+
+layers:
+  # Layers from top to bottom. By default, each layer may depend only on lower ones.
+  # - name: presentation
+  #   responsibility: "HTTP controllers, DTOs, serialization"
+  #   depends_on: [application]
+  # - name: application
+  #   responsibility: "use cases, orchestration of domain logic"
+  #   depends_on: [domain]
+  # - name: domain
+  #   responsibility: "entities, value objects, business rules"
+  #   depends_on: []
+  # - name: infrastructure
+  #   responsibility: "port implementations: DB, external APIs"
+  #   depends_on: [domain, application]
+  []
+
+modules:
+  # Major functional modules of the project and their boundaries.
+  # - name: billing
+  #   path: src/billing
+  #   public_api: "src/billing/index.ts"
+  #   may_import_from: [shared, domain]
+  []
+
+dependency_rules:
+  # Explicit invariants. The agent checks them during planning.
+  # - "domain does not import anything from infrastructure"
+  # - "modules communicate only through public_api"
+  []
+
+patterns:
+  # Patterns the project follows.
+  # - repository
+  # - unit-of-work
+  # - cqrs
+  # - event-sourcing
+  []
+
+anti_patterns:
+  # Things that are forbidden or considered bad practice in this project.
+  # - "raw SQL queries outside infrastructure"
+  # - "business logic in controllers"
+  []
+
+extension_points:
+  # Where and how new functionality is typically added.
+  # - "new use case → src/application/<feature>/"
+  []
