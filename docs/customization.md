@@ -54,8 +54,9 @@ To add a new process feature (say, `security_review` or
 
 That's it — `/init-workflow` iterates the feature registry, so the new
 feature automatically appears in both the preset application step and the
-custom-mode interview. You do **not** need to touch `AGENTS.md §2`,
-`init-workflow.md`, or any adapter file.
+custom-mode interview. You do **not** need to touch `AGENTS.md`,
+`init-workflow.md`, or any adapter file. Update `.workflow/bootstrap.md`
+only if the initialization procedure itself changes.
 
 ### 3. Custom adapters for agents
 

@@ -12,14 +12,17 @@ for how the agent works.
 | `architecture.yml` | Style, layers, modules, dependency rules |
 | `conventions.yml` | Code style, naming, tests, commits |
 | `workflow.yml` | Rules for the agent itself: stages, light TDD, granular commits, history, blocking |
+| `bootstrap.md` | Initialization procedure; read only when pre-flight fails or `/init-workflow` is requested |
+| `state.yml` | Installed workflow reference and applied migration IDs |
 | `history/` | Local task history (in `.gitignore`) |
+| `backups/` | Local one-file backups created before workflow updates |
 
 ## Rules
 
 1. **Without filled-in configs the agent does not work.** If the required
    fields (`workflow.yml → blocking.required_non_empty_fields`) are empty,
-   the agent must stop and run the initialization procedure described in
-   `AGENTS.md` (the *Bootstrap* section).
+   the agent must stop, read `.workflow/bootstrap.md`, and run the
+   initialization procedure described there.
 
 2. **Every task → an entry in `history/`.** A file
    `history/YYYY-MM-DD-<slug>.md` is created with sections
@@ -46,12 +49,16 @@ for how the agent works.
    agent must verify that the project's current code still matches them
    and report any discrepancies.
 
+7. **Workflow updates are conservative.** The updater runs ordered
+   migrations for known managed paths, preserves unknown/custom keys,
+   and creates one backup per changed file in `backups/`.
+
 ## Commit presets
 
 During initialization the agent offers a named commit preset
 (`conventional`, `gitmoji`, `emoji-prefix`, `free-form`, or `custom`) and
 asks for the commit message language separately — any language works with
-any preset. Full definitions and examples live in `AGENTS.md` §2.5.
+any preset. Full definitions and examples live in `.workflow/bootstrap.md`.
 
 ## Initialization
 
@@ -62,4 +69,5 @@ any preset. Full definitions and examples live in `AGENTS.md` §2.5.
   `.workflow/`" — the agent will work through the manifests, structure,
   and linters and propose values.
 
-See `AGENTS.md` in the project root for the full description.
+See `AGENTS.md` in the project root for the normal task workflow and
+`.workflow/bootstrap.md` for initialization details.

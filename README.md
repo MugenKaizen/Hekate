@@ -111,10 +111,58 @@ CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 .workflow/conventions.yml
 .workflow/workflow.yml
 .workflow/presets.yml              # active preset + feature registry
+.workflow/bootstrap.md             # initialization procedure
+.workflow/state.yml                # installed snapshot + applied migrations
 .workflow/README.md
 .workflow/history/                 # gitignored
-.gitignore                         # appended: .workflow/history/
+.workflow/backups/                 # gitignored safety backups for updates
+.gitignore                         # appended: .workflow/history/, .workflow/backups/
 ```
+
+## Updating an existing installation
+
+In the root of the target project:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh | sh
+```
+
+Or with flags:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
+  | sh -s -- --target=. --ref=main
+```
+
+Pin to a specific commit:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
+  | sh -s -- --target=. --commit=<git-sha>
+```
+
+Update behavior:
+
+- `update.sh` is a stable bootstrap: it downloads the requested repository
+  snapshot (branch/tag via `--ref` or exact commit via `--commit`) and runs
+  the versioned `update-runner.sh` from that snapshot.
+- The runner applies pending scripts from `migrations/` in order, based on
+  `.workflow/state.yml -> schema.applied_migrations`.
+- `.workflow/*.yml` is updated conservatively: only known workflow keys are
+  changed by explicit migrations. Existing values win, and unknown/custom
+  keys are preserved.
+- Template-managed files (`AGENTS.md`, Claude/Cursor adapters,
+  `.workflow/bootstrap.md`, `.workflow/README.md`) are overwritten only if
+  they still match the previously installed template.
+- The root `README.md` is updated only when it is the Hekate README and still
+  matches the previously installed version; user project READMEs are left alone.
+- If a template-managed file has local edits, the updater leaves it in place
+  and writes `<file>.new` next to it for manual review.
+- Before changing any existing file, the updater stores a single latest backup
+  copy in `.workflow/backups/`.
+- Older installations without `.workflow/state.yml` are handled in a safe
+  legacy mode: YAML migrations still run, but edited template files are not
+  overwritten automatically.
 
 ## First run in a project
 
@@ -141,6 +189,11 @@ principles behind it. For extending it to your stack, see
 
 ```
 install.sh              # curl installer
+update.sh               # stable bootstrap that downloads a snapshot and runs the updater
+update-runner.sh        # versioned update runner from the downloaded snapshot
+lib/
+  update-common.sh      # shared helpers for runner and migrations
+migrations/             # ordered schema migrations for .workflow/*.yml
 templates/              # what gets deployed into the project
   AGENTS.md
   .workflow/            # YAML configs

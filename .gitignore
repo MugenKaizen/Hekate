@@ -11,3 +11,4 @@ Thumbs.db
 
 # Local workflow state (if the tool is used inside its own repo)
 /.workflow/history/
+/.workflow/backups/

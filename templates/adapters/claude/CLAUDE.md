@@ -13,7 +13,7 @@ Also read the configs in `.workflow/`:
 
 If the required fields in these files are not filled in, or
 `presets.yml → meta.active_preset` is `null` — **do not start work**. Run
-`/init-workflow` or perform the *Bootstrap* procedure from `AGENTS.md`.
+`/init-workflow` or perform the procedure from `.workflow/bootstrap.md`.
 
 Which stages are mandatory depends on the active preset. Respect the
 feature flags in `workflow.yml` (they mirror `presets.yml`).
