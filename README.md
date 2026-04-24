@@ -141,6 +141,13 @@ curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
   | sh -s -- --target=. --commit=<git-sha>
 ```
 
+Overwrite locally edited managed files after confirmation:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
+  | sh -s -- --target=. --force
+```
+
 Update behavior:
 
 - `update.sh` is a stable bootstrap: it downloads the requested repository
@@ -157,7 +164,8 @@ Update behavior:
 - The root `README.md` is updated only when it is the Hekate README and still
   matches the previously installed version; user project READMEs are left alone.
 - If a template-managed file has local edits, the updater leaves it in place
-  and writes `<file>.new` next to it for manual review.
+  and writes `<file>.new` next to it for manual review. With `--force`, the
+  updater warns, asks for confirmation, then overwrites those files after backup.
 - Before changing any existing file, the updater stores a single latest backup
   copy in `.workflow/backups/`.
 - Older installations without `.workflow/state.yml` are handled in a safe

@@ -1,5 +1,13 @@
 #!/usr/bin/env sh
 # ai_agent_workflow update runner
+#
+# Flags:
+#   --target=<path>     Root of the target project. Defaults to the current directory.
+#   --repo=<owner/name> GitHub repository. Defaults to the built-in one.
+#   --ref=<git-ref>     Branch/tag to update to. Defaults to main.
+#   --commit=<sha>      Exact commit to update to.
+#   --force             Overwrite locally edited managed files after confirmation.
+#   --dry-run           Show what would be done without making changes.
 
 set -eu
 
@@ -8,6 +16,7 @@ REPO="${AAW_REPO:-MugenKaizen/Hekate}"
 REF="main"
 COMMIT=""
 DRY_RUN=0
+FORCE=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -16,8 +25,9 @@ for arg in "$@"; do
     --ref=*)    REF="${arg#--ref=}" ;;
     --commit=*) COMMIT="${arg#--commit=}" ;;
     --dry-run)  DRY_RUN=1 ;;
+    --force)    FORCE=1 ;;
     -h|--help)
-      sed -n '2,14p' "$0"
+      sed -n '2,10p' "$0"
       exit 0
       ;;
     *)
@@ -76,7 +86,31 @@ update_template_file() {
     return 0
   fi
 
+  if [ "$FORCE" -eq 1 ]; then
+    backup_file "$target_rel"
+    copy_file "$new_src" "$target_path"
+    log "updated: $target_path"
+    return 0
+  fi
+
   write_review_file "$target_rel" "$new_src"
+}
+
+confirm_force_update() {
+  if [ "$FORCE" -eq 0 ] || [ "$DRY_RUN" -eq 1 ]; then
+    return 0
+  fi
+
+  warn "--force enabled; locally edited template-managed files will be overwritten after backup."
+  if [ ! -r /dev/tty ]; then
+    die "--force requires an interactive terminal for confirmation"
+  fi
+
+  printf '[aaw] Continue? Type "yes" to proceed: ' > /dev/tty
+  IFS= read -r answer < /dev/tty
+  if [ "$answer" != "yes" ]; then
+    die "update cancelled"
+  fi
 }
 
 update_root_readme() {
@@ -103,6 +137,13 @@ update_root_readme() {
   fi
 
   if grep -qxF "# Hekate" "$target_path" 2>/dev/null; then
+    if [ "$FORCE" -eq 1 ]; then
+      backup_file "README.md"
+      copy_file "$new_src" "$target_path"
+      log "updated: $target_path"
+      return 0
+    fi
+
     write_review_file "README.md" "$new_src"
   fi
 }
@@ -209,7 +250,7 @@ run_migrations() {
 [ -f "$TARGET/.workflow/presets.yml" ] || die "target does not look like a workflow installation: .workflow/presets.yml missing"
 [ -d "$RUNNER_ROOT/templates" ] || die "runner source is incomplete: templates/ missing"
 
-export TARGET REPO REF COMMIT DRY_RUN RUNNER_ROOT TMP_ROOT STATE_FILE BACKUP_ROOT BACKED_UP_LIST_FILE APPLIED_MIGRATIONS_FILE
+export TARGET REPO REF COMMIT DRY_RUN FORCE RUNNER_ROOT TMP_ROOT STATE_FILE BACKUP_ROOT BACKED_UP_LIST_FILE APPLIED_MIGRATIONS_FILE
 : > "$BACKED_UP_LIST_FILE"
 seed_applied_migrations_file "$STATE_FILE" "$APPLIED_MIGRATIONS_FILE"
 
@@ -244,6 +285,7 @@ else
   log "updating to ref: $REF"
 fi
 [ "$DRY_RUN" -eq 1 ] && log "DRY RUN — no files will be written"
+confirm_force_update
 
 append_gitignore "$RUNNER_ROOT/templates/gitignore.snippet"
 run_migrations
