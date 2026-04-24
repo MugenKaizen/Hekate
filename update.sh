@@ -5,6 +5,16 @@
 #   curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh | sh
 #   curl -fsSL .../update.sh | sh -s -- --target=/path/to/proj --ref=main
 #   curl -fsSL .../update.sh | sh -s -- --target=/path/to/proj --commit=<sha>
+#   curl -fsSL .../update.sh | sh -s -- --force
+#
+# Flags:
+#   --target=<path>     Root of the target project. Defaults to the current directory.
+#   --source=<path>     Local copy of the repository (for updater development).
+#   --repo=<owner/name> GitHub repository. Defaults to the built-in one.
+#   --ref=<git-ref>     Branch/tag to update to. Defaults to main.
+#   --commit=<sha>      Exact commit to update to.
+#   --force             Overwrite locally edited managed files after confirmation.
+#   --dry-run           Show what would be done without making changes.
 
 set -eu
 
@@ -14,6 +24,7 @@ REPO="${AAW_REPO:-MugenKaizen/Hekate}"
 REF="main"
 COMMIT=""
 DRY_RUN=0
+FORCE=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -23,6 +34,7 @@ for arg in "$@"; do
     --ref=*)    REF="${arg#--ref=}" ;;
     --commit=*) COMMIT="${arg#--commit=}" ;;
     --dry-run)  DRY_RUN=1 ;;
+    --force)    FORCE=1 ;;
     -h|--help)
       sed -n '2,18p' "$0"
       exit 0
@@ -83,6 +95,9 @@ if [ -n "$COMMIT" ]; then
 fi
 if [ "$DRY_RUN" -eq 1 ]; then
   set -- "$@" "--dry-run"
+fi
+if [ "$FORCE" -eq 1 ]; then
+  set -- "$@" "--force"
 fi
 
 log "starting update runner from snapshot"
