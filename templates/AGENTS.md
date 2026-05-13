@@ -6,27 +6,47 @@ agent-specific files (`CLAUDE.md`, `.cursor/rules/*`, and so on) must
 point here.
 
 > **Rule #0.** Before doing anything in this project, read this file in
-> full along with the `.workflow/*.yml` configs listed below. If that has
-> already been done in the current session, you don't need to re-read them.
-> Do not read `.workflow/bootstrap.md` unless initialization is required.
+> full and read only `.workflow/status.yml` for the fast pre-flight check.
+> Do not load all `.workflow/*.yml` at startup. Lazy-load the detailed
+> configs only when the task needs them. Do not read `.workflow/bootstrap.md`
+> unless initialization is required.
 
 ---
 
 ## 1. Pre-flight check (required before any task)
 
-1. Read `.workflow/stack.yml`, `.workflow/architecture.yml`,
-   `.workflow/conventions.yml`, `.workflow/workflow.yml`,
-   `.workflow/presets.yml`.
-2. Verify that every required file from
-   `workflow.yml → blocking.required_files` is present and every required
-   field from `workflow.yml → blocking.required_non_empty_fields` is filled in.
-3. If **any** file is missing, `presets.yml → meta.active_preset` is `null`,
-   or a required field is empty — **stop**, read `.workflow/bootstrap.md`, and
-   run that procedure. Do not write code, do not create plans, do not make
-   edits until initialization is complete.
-4. If everything is filled in — proceed to **Task workflow**. When deciding
-   which stages are mandatory, respect the feature flags in `workflow.yml`
-   (which reflect the active preset from `presets.yml`).
+1. Read `.workflow/status.yml` only.
+2. Verify these fast-check values:
+   - `initialized: true`
+   - `active_preset` is not `null`
+   - `checks.required_files_present: true`
+   - `checks.required_fields_filled: true`
+3. If `.workflow/status.yml` is missing, any value above fails, or any value is
+   `unknown` — **stop**, read `.workflow/bootstrap.md`, and run or refresh that
+   procedure. Do not write code, do not create plans, do not make edits until
+   initialization is complete and `.workflow/status.yml` is updated.
+4. If the fast check passes — proceed to **Task workflow**. When deciding which
+   stages are mandatory, use `status.yml → features`. Read
+   `.workflow/workflow.yml` only if a needed rule is not represented in
+   `status.yml`.
+
+### 1.1 Lazy-loading rules
+
+Do not read detailed workflow configs speculatively. Load them only when the
+current task needs the information:
+
+- `.workflow/stack.yml` — when choosing commands, dependencies, runtime,
+  framework-specific implementation, or answering stack questions.
+- `.workflow/architecture.yml` — when changing module boundaries,
+  dependencies, layers, architecture, or comparing solution options.
+- `.workflow/conventions.yml` — when creating/editing code, tests,
+  documentation, branches, or commit messages.
+- `.workflow/workflow.yml` — when a process detail is missing from
+  `status.yml`, or when editing workflow behavior itself.
+- `.workflow/presets.yml` — only during initialization, preset changes, or
+  workflow feature customization.
+- `.workflow/bootstrap.md` — only when the fast pre-flight check fails or the
+  user explicitly asks to initialize the workflow.
 
 ---
 
@@ -49,11 +69,11 @@ For **every non-trivial task**, this order is required:
 - Understand **what** is being asked and **why**. If the goal is unclear,
   ask clarifying questions before starting the analysis.
 - Find and read the affected files. Don't guess — read.
-- Check the applicable sections of `.workflow/architecture.yml` and
+- Lazy-load only the applicable sections of `.workflow/architecture.yml` and
   `.workflow/conventions.yml`.
-- Decide whether `workflow.yml → process.light_tdd` applies to this task.
+- Decide whether `status.yml → features.light_tdd` applies to this task.
   For behavior changes, identify which test should be added or updated first.
-- If `workflow.yml → process.granular_commits` is enabled, decide whether the
+- If `status.yml → features.granular_commits` is enabled, decide whether the
   task is large. A large task has at least 2 independently verifiable
   checkpoints that can be completed and committed without leaving the branch in
   a broken state.
@@ -62,7 +82,7 @@ For **every non-trivial task**, this order is required:
 
 ### 3.2. Options
 
-- Propose **at least 2 options** for the solution (unless `workflow.yml`
+- Propose **at least 2 options** for the solution (unless `status.yml`
   allows skipping for trivial tasks).
 - For each option — **pros** and **cons**. The cons must include
   architectural rule violations if there are any.
@@ -84,15 +104,15 @@ and executed. The plan must include:
 5. **Rollback notes** — what to do if something goes wrong (for risky
    changes).
 6. **Checkpoint checklist** — required for large tasks when
-   `workflow.yml → process.granular_commits.enabled` is `true`.
+   `status.yml → features.granular_commits` is `true`.
 
-When `workflow.yml → process.light_tdd` applies, the steps should reflect a
+When `status.yml → features.light_tdd` applies, the steps should reflect a
 lightweight TDD loop: add or update a focused test first, run the narrowest
 relevant check if practical to see it fail, then implement the minimum code
 needed to make it pass. If test-first is impractical, explicitly state why in
 Analysis or Plan and add the test immediately after implementation.
 
-When `workflow.yml → process.granular_commits` applies, the plan must include
+When `status.yml → features.granular_commits` applies, the plan must include
 checkpoint boundaries in the same history file. Each checkpoint must describe:
 
 - the slice of work being completed;
@@ -106,12 +126,12 @@ Wait for plan approval before executing.
 - Follow the plan step by step.
 - If along the way you realize the plan is wrong — stop, update the plan,
   get re-approval.
-- For non-trivial behavior changes, follow `workflow.yml → process.light_tdd`.
+- For non-trivial behavior changes, follow `status.yml → features.light_tdd`.
   The default mode is `strict-lite`: use test-first unless there is a clear,
   stated reason not to.
-- If `workflow.yml → process.granular_commits` applies, execute checkpoint by
+- If `status.yml → features.granular_commits` applies, execute checkpoint by
   checkpoint. After a checkpoint is verified, mark it complete in the task
-  history and handle the commit according to `process.granular_commits.mode`:
+  history and handle the commit according to the resolved granular-commits mode:
   - `auto` — create the commit immediately.
   - `ask` — stop and ask the user before creating the commit.
 - Commit messages for checkpoints must follow `.workflow/conventions.yml`.
@@ -177,7 +197,7 @@ exists so the agent has continuity between sessions.
 ```
 
 The `Checkpoint checklist` section is required only for large tasks when
-`workflow.yml → process.granular_commits.enabled` is `true`.
+`status.yml → features.granular_commits` is `true`.
 
 ### 4.2. events.jsonl
 
@@ -214,5 +234,6 @@ Allowed `type` values: `started | analyzed | options_proposed | planned | checkp
 - `.workflow/architecture.yml` — architecture
 - `.workflow/conventions.yml` — code style and conventions
 - `.workflow/workflow.yml` — agent's working rules
+- `.workflow/status.yml` — fast pre-flight index; read before any work
 - `.workflow/bootstrap.md` — initialization procedure; read only when pre-flight fails
 - `.workflow/README.md` — brief cheat sheet

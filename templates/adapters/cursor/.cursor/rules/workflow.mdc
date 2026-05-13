@@ -1,5 +1,5 @@
 ---
-description: Mandatory working process — before any task, read AGENTS.md and .workflow/*.yml
+description: Mandatory working process — before any task, read AGENTS.md and .workflow/status.yml
 globs: **/*
 alwaysApply: true
 ---
@@ -9,39 +9,37 @@ alwaysApply: true
 This project uses **`AGENTS.md`** (in the repository root) as the single
 source of truth for all AI agents. Read it in full before doing any work.
 
-Also read:
+For pre-flight, read only:
 
-- `.workflow/stack.yml` — technology stack
-- `.workflow/architecture.yml` — architecture, layers, dependency rules
-- `.workflow/conventions.yml` — code style, naming, tests, commits
-- `.workflow/workflow.yml` — rules for how the agent works
-- `.workflow/presets.yml` — workflow preset (fast / medium / full / custom)
-  and the registry of customizable process features
+- `.workflow/status.yml` — initialization status and resolved feature flags
+
+Lazy-load the detailed `.workflow/*.yml` files only when the current task needs
+stack, architecture, conventions, full workflow rules, or preset definitions.
 
 ## Blocking
 
-If the required fields (see `workflow.yml → blocking.required_non_empty_fields`)
-are not filled in — **do not start work**. Run the *Bootstrap* procedure
-from `.workflow/bootstrap.md`: analyze the project, fill out YAML
-drafts, get user confirmation.
+If `status.yml → initialized` is not `true`, `active_preset` is `null`, or any
+`checks.*` value is not `true` — **do not start work**. Run or refresh the
+*Bootstrap* procedure from `.workflow/bootstrap.md`: analyze the project, fill
+out YAML drafts, get user confirmation, and update `.workflow/status.yml`.
 
 ## Task cycle
 
 The required stages for this project depend on the active preset in
-`presets.yml → meta.active_preset`. Respect the flags in `workflow.yml`:
+`status.yml → active_preset`. Respect the flags in `status.yml → features`:
 only stages whose feature is enabled are mandatory.
 
 Typical full cycle: **Analyze → Options (≥2, with pros/cons) →
 Plan (self-contained, in `.workflow/history/`) → Execute → Verify**.
 
-If `workflow.yml → process.light_tdd.enabled: true`, apply light TDD for
+If `status.yml → features.light_tdd: true`, apply light TDD for
 non-trivial behavior changes. Default mode is `strict-lite`: add or update a
 focused test first unless there is a clear, explicitly stated reason not to.
 
-If `workflow.yml → process.granular_commits` is enabled and the task is large,
+If `status.yml → features.granular_commits` is enabled and the task is large,
 the plan must include a checkpoint checklist in `.workflow/history/`. After
-each verified checkpoint, create a commit automatically or ask first,
-depending on `process.granular_commits.mode`.
+each verified checkpoint, lazy-load `.workflow/workflow.yml` if the exact
+granular-commit mode is needed.
 
 Details are in section 3 of `AGENTS.md`.
 

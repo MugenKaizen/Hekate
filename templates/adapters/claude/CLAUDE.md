@@ -3,22 +3,19 @@
 This project uses **`AGENTS.md`** (in the project root) as the single
 source of truth for all AI agents. Read it in full before doing any work.
 
-Also read the configs in `.workflow/`:
+For pre-flight, read only:
 
-- `.workflow/stack.yml`
-- `.workflow/architecture.yml`
-- `.workflow/conventions.yml`
-- `.workflow/workflow.yml`
-- `.workflow/presets.yml` — active workflow preset + feature registry
+- `.workflow/status.yml` — fast initialization check and resolved feature flags
 
-If the required fields in these files are not filled in, or
-`presets.yml → meta.active_preset` is `null` — **do not start work**. Run
-`/init-workflow` or perform the procedure from `.workflow/bootstrap.md`.
+If `status.yml → initialized` is not `true`, `active_preset` is `null`, or
+any `checks.*` value is not `true` — **do not start work**. Run
+`/init-workflow` or perform/refresh the procedure from `.workflow/bootstrap.md`.
 
-Which stages are mandatory depends on the active preset. Respect the
-feature flags in `workflow.yml` (they mirror `presets.yml`).
+Which stages are mandatory depends on the resolved feature flags in
+`status.yml → features`. Lazy-load `.workflow/*.yml` only when the task needs
+stack, architecture, conventions, full workflow rules, or preset definitions.
 
-For large tasks, check whether `workflow.yml → process.granular_commits`
+For large tasks, check whether `status.yml → features.granular_commits`
 requires a checkpoint checklist and intermediate commits in `.workflow/history/`.
 
 Slash commands for convenience:

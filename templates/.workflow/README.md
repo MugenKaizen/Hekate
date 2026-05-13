@@ -12,6 +12,7 @@ for how the agent works.
 | `architecture.yml` | Style, layers, modules, dependency rules |
 | `conventions.yml` | Code style, naming, tests, commits |
 | `workflow.yml` | Rules for the agent itself: stages, light TDD, granular commits, history, blocking |
+| `status.yml` | Fast pre-flight index: initialized flag, active preset, resolved feature flags |
 | `bootstrap.md` | Initialization procedure; read only when pre-flight fails or `/init-workflow` is requested |
 | `state.yml` | Installed workflow reference and applied migration IDs |
 | `history/` | Local task history (in `.gitignore`) |
@@ -19,9 +20,10 @@ for how the agent works.
 
 ## Rules
 
-1. **Without filled-in configs the agent does not work.** If the required
-   fields (`workflow.yml → blocking.required_non_empty_fields`) are empty,
-   the agent must stop, read `.workflow/bootstrap.md`, and run the
+1. **Without filled-in configs the agent does not work.** At startup the agent
+   reads `.workflow/status.yml` only. If `initialized` is not `true`,
+   `active_preset` is `null`, or any `checks.*` value is not `true`, the agent
+   must stop, read `.workflow/bootstrap.md`, and run or refresh the
    initialization procedure described there.
 
 2. **Every task → an entry in `history/`.** A file
@@ -34,20 +36,20 @@ for how the agent works.
    The plan must be self-contained — runnable in a new session without
    additional context.
 
-4. **Light TDD for behavior changes.** `workflow.yml → process.light_tdd`
+4. **Light TDD for behavior changes.** `status.yml → features.light_tdd`
    controls the rule. The default is `strict-lite`: for a non-trivial
    behavior change, prefer a focused test first, then the minimum code to make
    it pass. Trivial/docs/config/mechanical edits may skip it.
 
-5. **Granular commits for large tasks.** `workflow.yml → process.granular_commits`
-   controls whether large tasks are split into verified checkpoints with
-   intermediate commits. The default is enabled, but initialization must still
-   ask the developer to confirm it and choose whether commits happen
-   automatically or only after a prompt.
+5. **Granular commits for large tasks.**
+   `status.yml → features.granular_commits` controls whether large tasks are
+   split into verified checkpoints with intermediate commits.
 
 6. **Edits to the configs** are made deliberately: after a change the
    agent must verify that the project's current code still matches them
-   and report any discrepancies.
+   and report any discrepancies. If the change affects initialization status,
+   active preset, required fields, or resolved feature flags, update
+   `.workflow/status.yml` in the same change.
 
 7. **Workflow updates are conservative.** The updater runs ordered
    migrations for known managed paths, preserves unknown/custom keys,

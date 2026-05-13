@@ -2,8 +2,8 @@
 
 Read this file only when initialization is required: configs are empty,
 missing, `presets.yml → meta.active_preset` is `null`, a required field is
-empty, or the user explicitly asks to "initialize the workflow" /
-"/init-workflow".
+empty, `.workflow/status.yml` is missing or not initialized, or the user
+explicitly asks to "initialize the workflow" / "/init-workflow".
 
 ## 1. Choose a workflow preset
 
@@ -92,6 +92,14 @@ Based on the facts, fill out drafts of all four YAML files. Then:
 
 - Write all YAML files: `stack.yml`, `architecture.yml`, `conventions.yml`,
   `workflow.yml`, and `presets.yml` (with `meta.active_preset` set).
+- Write `.workflow/status.yml` as the fast pre-flight index:
+  - `initialized: true`
+  - `active_preset` equal to `presets.yml → meta.active_preset`
+  - `checks.required_files_present: true`
+  - `checks.required_fields_filled: true`
+  - `features.*` equal to the resolved preset/custom feature map
+  - `required_files` and `required_non_empty_fields` mirror the blocking rules
+    from `workflow.yml`
 - Create `.workflow/history/` if it does not exist.
 - Make sure `.workflow/history/` is in `.gitignore` (if not, add it).
 - Tell the user: "The workflow is initialized. You can now assign tasks."
@@ -214,7 +222,9 @@ workflow (e.g., `security_review`, `architecture_diff`, `dependency_audit`):
 2. If needed, add the matching block to `.workflow/workflow.yml` at the
    path named in `controls`.
 3. Optionally reference the new feature from `AGENTS.md` task workflow so
-   agents know when to run it.
+    agents know when to run it.
+4. Add the feature's resolved boolean to `.workflow/status.yml → features`
+   if agents need it during normal pre-flight or task routing.
 
 **Do not** hardcode new features in `AGENTS.md`, `init-workflow.md`, or in
 adapter files. The bootstrap procedure is data-driven over `presets.yml` —

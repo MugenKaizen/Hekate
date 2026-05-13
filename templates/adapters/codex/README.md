@@ -8,7 +8,8 @@ If you want to highlight the workflow explicitly in
 
 ```markdown
 This project uses AGENTS.md as the single source of truth. Read
-AGENTS.md and .workflow/*.yml before any work. If the required fields
-in the configs are not filled in, do not start work — perform the
-Bootstrap procedure from `.workflow/bootstrap.md`.
+AGENTS.md and .workflow/status.yml before any work. Do not read every
+.workflow/*.yml at startup. If the fast pre-flight check in status.yml
+fails, do not start work — perform the Bootstrap procedure from
+`.workflow/bootstrap.md`.
 ```

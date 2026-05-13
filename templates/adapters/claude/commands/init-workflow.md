@@ -37,11 +37,13 @@ In short:
    `commits.language` verbatim.
 8. Show the user one file at a time and wait for confirmation.
 9. Write `meta.active_preset` to `.workflow/presets.yml` and mirror it to
-   `.workflow/workflow.yml → meta.preset`.
-10. After writing all YAML files, create
-    `.workflow/history/<date>-bootstrap.md` with the chosen preset, the
-    resolved feature map, and any assumptions.
-11. Make sure `.workflow/history/` is in `.gitignore`.
+    `.workflow/workflow.yml → meta.preset`.
+10. Write `.workflow/status.yml` with `initialized: true`, the active preset,
+    required-check booleans, and resolved feature flags.
+11. After writing all YAML files, create
+     `.workflow/history/<date>-bootstrap.md` with the chosen preset, the
+     resolved feature map, and any assumptions.
+12. Make sure `.workflow/history/` is in `.gitignore`.
 
 Do not start any other work until the required fields from
 `workflow.yml → blocking.required_non_empty_fields` are filled in and
