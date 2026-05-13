@@ -197,6 +197,7 @@ do_copy "$TPL/.workflow/architecture.yml" "$TARGET/.workflow/architecture.yml"
 do_copy "$TPL/.workflow/conventions.yml"  "$TARGET/.workflow/conventions.yml"
 do_copy "$TPL/.workflow/workflow.yml"     "$TARGET/.workflow/workflow.yml"
 do_copy "$TPL/.workflow/presets.yml"      "$TARGET/.workflow/presets.yml"
+do_copy "$TPL/.workflow/status.yml"       "$TARGET/.workflow/status.yml"
 do_copy "$TPL/.workflow/bootstrap.md"     "$TARGET/.workflow/bootstrap.md"
 do_copy "$TPL/.workflow/README.md"        "$TARGET/.workflow/README.md"
 do_copy "$TPL/.workflow/history/.gitkeep" "$TARGET/.workflow/history/.gitkeep"
@@ -236,7 +237,8 @@ cat <<EOF
  Next step:
     1. Open the project in your AI agent (Claude Code / Cursor / Codex / …).
     2. Ask: "initialize the workflow" (or /init-workflow in Claude).
-    3. The agent will analyze the project and fill out .workflow/*.yml.
+    3. The agent will analyze the project, fill out .workflow/*.yml,
+       and write .workflow/status.yml.
 
   To update an existing installation later:
     curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \

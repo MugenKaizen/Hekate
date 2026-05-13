@@ -12,7 +12,9 @@ and any other agent that reads `AGENTS.md`.
 ## What's in the box
 
 - **A single source of truth** (`AGENTS.md` + `.workflow/*.yml`)
-  regardless of which agent the developer uses.
+  regardless of which agent the developer uses. Startup stays cheap through
+  `.workflow/status.yml`, a small pre-flight index; detailed YAML is loaded
+  only when a task needs it.
 - **A mandatory cycle** for every non-trivial task:
   `Analyze → Options (≥2 with pros/cons) → Plan (self-contained) → Execute → Verify`.
 
@@ -49,8 +51,8 @@ actually helps in practice is something only real use will show.
 - **One set of rules across agents.** AI tools rely on different
   instruction formats, so team rules tend to get duplicated and drift
   apart. The workflow treats `AGENTS.md` and `.workflow/*.yml` as the
-  source of truth, so Claude, Cursor, Codex, and others can read the
-  same rules.
+  source of truth, with `.workflow/status.yml` as the fast entry point, so
+  Claude, Cursor, Codex, and others can read the same rules.
 - **Re-entry into sessions without rebuilding context from scratch.**
   Context is normally scattered across source code, old chats, and
   partial docs. The workflow tries to give the agent a structured view
@@ -111,6 +113,7 @@ CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 .workflow/conventions.yml
 .workflow/workflow.yml
 .workflow/presets.yml              # active preset + feature registry
+.workflow/status.yml               # fast pre-flight index for agents
 .workflow/bootstrap.md             # initialization procedure
 .workflow/state.yml                # installed snapshot + applied migrations
 .workflow/README.md
@@ -185,7 +188,8 @@ Update behavior:
      and conventions.
    - **Existing project** → will read manifests/configs/structure and propose
      YAML drafts, asking for confirmation.
-5. Once the required fields are filled in, the agent is ready to work by the cycle.
+5. Once the required fields are filled in, the agent writes `.workflow/status.yml`
+   and is ready to work by the cycle.
 
 ## Philosophy
 
@@ -204,7 +208,7 @@ lib/
 migrations/             # ordered schema migrations for .workflow/*.yml
 templates/              # what gets deployed into the project
   AGENTS.md
-  .workflow/            # YAML configs
+  .workflow/            # YAML configs + status index
   adapters/
     claude/             # CLAUDE.md, commands/, skills/
     cursor/             # .cursor/rules/

@@ -8,8 +8,9 @@ team.
 ### 1. Filling in the YAML (the common case)
 
 Just fill out `.workflow/*.yml` for your stack. No need to fork anything.
-The agent reads these files every session, so changes take effect
-immediately.
+The agent reads `.workflow/status.yml` every session and lazy-loads detailed
+YAML only when a task needs it. If you change initialization status, required
+fields, active preset, or resolved feature flags, update `status.yml` too.
 
 ### 2. Adding fields to the YAML
 
@@ -18,7 +19,8 @@ environments or your company's security policies) — just add them. The
 agent does not complain about "extra" keys.
 
 For fields that should **block work** when empty, add them to
-`workflow.yml → blocking.required_non_empty_fields`:
+`workflow.yml → blocking.required_non_empty_fields` and mirror the check in
+`.workflow/status.yml`:
 
 ```yaml
 blocking:
@@ -51,6 +53,8 @@ To add a new process feature (say, `security_review` or
    `workflow.yml` under the path in `controls`.
 3. Optionally reference the new feature in `AGENTS.md` §3 so the agent
    knows when to run it during the task cycle.
+4. If normal task routing needs the resolved value, add it to
+   `.workflow/status.yml → features` so startup stays cheap.
 
 That's it — `/init-workflow` iterates the feature registry, so the new
 feature automatically appears in both the preset application step and the
@@ -63,7 +67,7 @@ only if the initialization procedure itself changes.
 If your agent is not on the list (Aider, Gemini CLI, Continue, Windsurf…),
 create a file for it that points to `AGENTS.md`:
 
-- **Aider**: add `read: [AGENTS.md, .workflow/workflow.yml]` to `.aider.conf.yml`.
+- **Aider**: add `read: [AGENTS.md, .workflow/status.yml]` to `.aider.conf.yml`.
 - **Continue**: in `.continue/config.json`, set a system prompt that
   references `AGENTS.md`.
 - **Windsurf / Gemini CLI**: usually read `AGENTS.md` out of the box.

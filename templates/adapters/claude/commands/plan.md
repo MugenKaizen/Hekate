@@ -21,16 +21,16 @@ Required sections:
 5. **Rollback notes** — what to do if something goes wrong (for risky
    changes; may be omitted for simple ones).
 6. **Checkpoint checklist** — for large tasks when
-   `workflow.yml → process.granular_commits.enabled` is `true`. Each checkpoint
+   `status.yml → features.granular_commits` is `true`. Each checkpoint
    must include its verification and the commit message to use after it passes.
 
-If `workflow.yml → process.light_tdd` applies, reflect it in the steps:
+If `status.yml → features.light_tdd` applies, reflect it in the steps:
 add or update a focused test first, run the narrowest relevant check if
 practical to see it fail, then implement the minimum code needed to make
 it pass. If test-first is impractical, state why in the plan and add the
 test immediately after implementation.
 
-If `workflow.yml → process.granular_commits` applies, break the work into
+If `status.yml → features.granular_commits` applies, break the work into
 checkpoint-sized slices that can be verified and committed independently.
 
 If solution options haven't been discussed yet, first go back to the
