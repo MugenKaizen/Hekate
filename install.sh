@@ -244,6 +244,9 @@ cat <<EOF
     curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
       | sh -s -- --target=/path/to/project
 
+  On Windows PowerShell 5.1+:
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target C:\path\to\project
+
  Until the required fields are filled in, the agent will NOT work — this is by design.
 ─────────────────────────────────────────────────────────
 EOF
