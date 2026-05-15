@@ -82,11 +82,23 @@ In the root of the target project:
 curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.sh | sh
 ```
 
+On Windows PowerShell 5.1+:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.ps1)))
+```
+
 Or with flags:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.sh \
   | sh -s -- --target=. --agents=claude,cursor,codex
+```
+
+Windows PowerShell 5.1+:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.ps1))) -Target . -Agents claude,cursor,codex
 ```
 
 Supported flags:
@@ -99,6 +111,9 @@ Supported flags:
 | `--dry-run` | Show what would be done without making changes. |
 | `--ref=<git-ref>` | Branch/tag to download. Defaults to `main`. |
 | `--source=<path>` | Local copy of the repository (for debugging). |
+
+PowerShell accepts the same options as named parameters: `-Target`, `-Agents`,
+`-Force`, `-DryRun`, `-Ref`, `-Source`, and `-Repo`.
 
 What will appear in the project:
 
@@ -130,11 +145,23 @@ In the root of the target project:
 curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh | sh
 ```
 
+On Windows PowerShell 5.1+:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1)))
+```
+
 Or with flags:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
   | sh -s -- --target=. --ref=main
+```
+
+Windows PowerShell 5.1+:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target . -Ref main
 ```
 
 Pin to a specific commit:
@@ -144,6 +171,12 @@ curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
   | sh -s -- --target=. --commit=<git-sha>
 ```
 
+Windows PowerShell 5.1+:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target . -Commit <git-sha>
+```
+
 Overwrite locally edited managed files after confirmation:
 
 ```sh
@@ -151,11 +184,19 @@ curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
   | sh -s -- --target=. --force
 ```
 
+Windows PowerShell 5.1+:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target . -Force
+```
+
 Update behavior:
 
 - `update.sh` is a stable bootstrap: it downloads the requested repository
   snapshot (branch/tag via `--ref` or exact commit via `--commit`) and runs
   the versioned `update-runner.sh` from that snapshot.
+- `update.ps1` provides the same flow for Windows PowerShell 5.1+ and runs
+  the versioned `update-runner.ps1` from the downloaded snapshot.
 - The runner applies pending scripts from `migrations/` in order, based on
   `.workflow/state.yml -> schema.applied_migrations`.
 - `.workflow/*.yml` is updated conservatively: only known workflow keys are
