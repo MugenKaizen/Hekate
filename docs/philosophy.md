@@ -43,7 +43,12 @@ But in practice:
    a project artifact. If something from the history belongs in the
    repo — move it to a regular changelog/ADR.
 
-7. **Minimum magic.** No shipped binaries, daemons, MCP servers, or runtime
-   dependencies. Shell/PowerShell + Markdown + YAML. Optional cross-harness
-   orchestration is a project-local job-control script that starts ordinary CLI
-   processes and persists inspectable files; it is not a resident service.
+7. **Minimum magic and one orchestration owner.** No shipped binaries, daemons,
+   MCP servers, or runtime dependencies. Shell/PowerShell + Markdown + YAML.
+   Optional cross-harness orchestration is a project-local job-control script
+   that starts ordinary CLI processes and persists inspectable files; it is not
+   a resident service. The primary user-facing harness retains architecture,
+   decomposition, orchestration, review, and final verification; children only
+   execute or advise within bounded slices. Native subagents are also governed
+   by a local user policy: disabled, approval before each exact wave, or
+   explicitly authorized automatic use.

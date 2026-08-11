@@ -18,6 +18,11 @@ stack, architecture, conventions, full workflow rules, or preset definitions.
 For large tasks, check whether `status.yml → features.granular_commits`
 requires a checkpoint checklist and intermediate commits in `.workflow/history/`.
 
+Before using native Claude subagents, apply `AGENTS.md → Native-subagent session
+policy` from `.workflow/session.local.yml`: `off`, `ask`, or `auto`. Missing or
+invalid mode means `ask`; in `ask`, one user approval covers only the exact
+proposed delegation wave.
+
 Slash commands for convenience:
 
 - `/init-workflow` — initialize or complete `.workflow/*.yml`
@@ -25,6 +30,11 @@ Slash commands for convenience:
 - `/plan` — produce a plan (stage 3.3)
 - `/harness` — start or manage a long-running job in another configured CLI harness
 
-When `.workflow/status.yml → orchestration.enabled` is true, prefer the
-project-local `.workflow/bin/hekate-agent` controller over ad-hoc nested CLI
-commands. Claude may use the `harness-orchestrator` custom subagent for this.
+When `.workflow/status.yml → orchestration.enabled` is true, this user-facing
+Claude session remains the primary harness and exclusively owns architecture,
+decomposition, routing, subagent/harness orchestration, review, and final
+verification. Prefer `.workflow/bin/hekate-agent` over ad-hoc nested CLI
+commands. Delegated children are bounded executors/advisors and cannot
+re-delegate. The `harness-orchestrator` custom agent may only monitor an
+existing job ID already started by the primary session; it cannot start jobs or
+select scope or routing.

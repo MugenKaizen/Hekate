@@ -16,13 +16,20 @@ function Fail([string]$Message) { throw "hekate-agent: $Message" }
 function Scalar([string]$Value) { if ($null -eq $Value) { return '' }; $v=$Value.Trim(); if (($v.StartsWith('"') -and $v.EndsWith('"')) -or ($v.StartsWith("'") -and $v.EndsWith("'"))) { return $v.Substring(1,$v.Length-2) }; return $v }
 function TopValueFrom([string]$File,[string]$Key) { if (-not (Test-Path -LiteralPath $File)) { return '' }; foreach($line in Get-Content -LiteralPath $File) { if($line -match ('^'+[regex]::Escape($Key)+':\s*(.*?)\s*(?:#.*)?$')) { return Scalar $matches[1] } }; return '' }
 function TopValue([string]$Key) { $v=TopValueFrom $LocalConfig $Key; if(-not $v){$v=TopValueFrom $Config $Key}; return $v }
-function HarnessNames { $inside=$false; foreach($line in Get-Content -LiteralPath $Config){ if($line -match '^harnesses:\s*$'){$inside=$true;continue}; if($inside -and $line -match '^\S'){break}; if($inside -and $line -match '^  ([A-Za-z0-9_-]+):\s*$'){$matches[1]} } }
-function HarnessValueFrom([string]$File,[string]$Harness,[string]$Key) { if(-not(Test-Path -LiteralPath $File)){return ''}; $inside=$false; foreach($line in Get-Content -LiteralPath $File){ if($line -match ('^  '+[regex]::Escape($Harness)+':\s*$')){$inside=$true;continue}; if($inside -and $line -match '^  [A-Za-z0-9_-]+:\s*$'){break}; if($inside -and $line -match ('^    '+[regex]::Escape($Key)+':\s*(.*?)\s*(?:#.*)?$')){return Scalar $matches[1]} }; return '' }
-function LocalDefault([string]$Harness,[string]$Key) { if(-not(Test-Path -LiteralPath $LocalConfig)){return ''}; $defaults=$false;$inside=$false; foreach($line in Get-Content -LiteralPath $LocalConfig){if($line-match'^defaults:\s*$'){$defaults=$true;continue};if($defaults-and$line-match'^\S'){break};if($defaults-and$line-match('^  '+[regex]::Escape($Harness)+':\s*$')){$inside=$true;continue};if($inside-and$line-match'^  [A-Za-z0-9_-]+:\s*$'){break};if($inside-and$line-match('^    '+[regex]::Escape($Key)+':\s*(.*?)\s*$')){return Scalar $matches[1]}};return '' }
+function SectionNames([string]$File,[string]$Section) { if(-not(Test-Path -LiteralPath $File)){return};$inside=$false;foreach($line in Get-Content -LiteralPath $File){if($line-match('^'+[regex]::Escape($Section)+':\s*$')){$inside=$true;continue};if($inside-and$line-match'^\S'){break};if($inside-and$line-match'^  ([A-Za-z0-9_.-]+):\s*$'){$matches[1]}} }
+function HarnessNames { SectionNames $Config 'harnesses' }
+function ProfileNames { @(@((SectionNames $Config 'profiles')) + @((SectionNames $LocalConfig 'profiles'))) | Where-Object { $_ -notin @('none','null') } | Select-Object -Unique }
+function HarnessValueFrom([string]$File,[string]$Harness,[string]$Key) { return SectionValueFrom $File 'harnesses' $Harness $Key }
+function SectionValueFrom([string]$File,[string]$Section,[string]$Item,[string]$Key) { if(-not(Test-Path -LiteralPath $File)){return ''};$sectionFound=$false;$inside=$false;foreach($line in Get-Content -LiteralPath $File){if($line-match('^'+[regex]::Escape($Section)+':\s*$')){$sectionFound=$true;continue};if($sectionFound-and$line-match'^\S'){break};if($sectionFound-and$line-match('^  '+[regex]::Escape($Item)+':\s*$')){$inside=$true;continue};if($inside-and$line-match'^  [A-Za-z0-9_.-]+:\s*$'){break};if($inside-and$line-match('^    '+[regex]::Escape($Key)+':\s*(.*?)\s*(?:#.*)?$')){return Scalar $matches[1]}};return '' }
+function LocalDefault([string]$Harness,[string]$Key) { return SectionValueFrom $LocalConfig 'defaults' $Harness $Key }
+function ProfileValue([string]$Profile,[string]$Key) { $v=SectionValueFrom $LocalConfig 'profiles' $Profile $Key;if(-not$v){$v=SectionValueFrom $Config 'profiles' $Profile $Key};return $v }
+function DefaultProfile { $v=TopValue 'default_profile';if($v-in@('','null','none')){return ''};return $v }
 function HarnessValue([string]$Harness,[string]$Key) { $v='';if($Key-eq'default_model'){$v=LocalDefault $Harness 'model'}elseif($Key-eq'default_effort'){$v=LocalDefault $Harness 'effort'};if(-not$v){$v=HarnessValueFrom $Config $Harness $Key};return $v }
-function HarnessList([string]$Harness,[string]$Key) { $inside=$false;$list=$false;foreach($line in Get-Content -LiteralPath $Config){if($line-match('^  '+[regex]::Escape($Harness)+':\s*$')){$inside=$true;continue};if($inside-and$line-match'^  [A-Za-z0-9_-]+:\s*$'){break};if($inside-and$line-match('^    '+[regex]::Escape($Key)+':\s*$')){$list=$true;continue};if($list-and$line-match'^      -\s*(.*)$'){Scalar $matches[1];continue};if($list-and$line-match'^    [A-Za-z0-9_-]+:'){break}} }
+function HarnessList([string]$Harness,[string]$Key) { $section=$false;$inside=$false;$list=$false;foreach($line in Get-Content -LiteralPath $Config){if($line-match'^harnesses:\s*$'){$section=$true;continue};if($section-and$line-match'^\S'){break};if($section-and$line-match('^  '+[regex]::Escape($Harness)+':\s*$')){$inside=$true;continue};if($inside-and$line-match'^  [A-Za-z0-9_.-]+:\s*$'){break};if($inside-and$line-match('^    '+[regex]::Escape($Key)+':\s*$')){$list=$true;continue};if($list-and$line-match'^      -\s*(.*)$'){Scalar $matches[1];continue};if($list-and$line-match'^    [A-Za-z0-9_-]+:'){break}} }
 function HasHarness([string]$Name) { return @((HarnessNames)) -contains $Name }
-function ValidateId([string]$Value) { if($Value-notmatch'^[A-Za-z0-9_-]+$'){Fail "invalid identifier: $Value"} }
+function HasProfile([string]$Name) { return @((ProfileNames)) -contains $Name }
+function ValidateId([string]$Value) { if($Value-notmatch'^[A-Za-z0-9][A-Za-z0-9_.-]*$'){Fail "invalid identifier: $Value"} }
+function ValidateProfileId([string]$Value) { ValidateId $Value;if($Value-in@('none','null')){Fail "reserved profile name: $Value"} }
 function ValidateValue([string]$Label,[string]$Value) { if($Value-notmatch'^[A-Za-z0-9._:/@+~-]+$'){Fail "invalid ${Label}: $Value"} }
 function ResolveSafeCwd([string]$Value) {
     $full = [IO.Path]::GetFullPath($Value).TrimEnd('\','/')
@@ -120,27 +127,43 @@ function InvokeWorker([string]$RunDir){
 }
 
 function ShowHarnesses { '{0,-12} {1,-8} {2,-22} {3,-10} {4}'-f'HARNESS','ENABLED','MODEL','EFFORT','COMMAND';foreach($h in HarnessNames){'{0,-12} {1,-8} {2,-22} {3,-10} {4}'-f$h,(HarnessValue $h 'enabled'),(HarnessValue $h 'default_model'),(HarnessValue $h 'default_effort'),(HarnessValue $h 'command')} }
+function ShowProfiles { '{0,-14} {1,-12} {2,-28} {3}'-f'PROFILE','HARNESS','MODEL','EFFORT';foreach($p in ProfileNames){'{0,-14} {1,-12} {2,-28} {3}'-f$p,(ProfileValue $p 'harness'),(ProfileValue $p 'model'),(ProfileValue $p 'effort')} }
 function ShowHelp {@'
-Usage: hekate-agent.ps1 doctor|harnesses|models|config|run|list|status|logs|wait|result|stop
+Usage: hekate-agent.ps1 doctor|harnesses|profiles|models|config|run|list|status|logs|wait|result|stop
 Run `Get-Help .workflow/bin/hekate-agent.ps1` or see .workflow/README.md for examples.
 '@}
-function WriteLocal([string]$Selected,[string]$Model,[string]$Effort){$lines=@('# Per-developer overrides; generated by hekate-agent.','schema_version: 1','enabled: true',"default_harness: $Selected",'defaults:');foreach($h in HarnessNames){$m=HarnessValue $h 'default_model';$e=HarnessValue $h 'default_effort';if($h-eq$Selected){if($Model){$m=$Model};if($Effort){$e=$Effort}};$lines+="  ${h}:";$lines+="    model: $m";$lines+="    effort: $e"};$tmp="$LocalConfig.tmp.$PID";[IO.File]::WriteAllLines($tmp,$lines,[Text.UTF8Encoding]::new($false));Move-Item -Force $tmp $LocalConfig}
+function WriteLocal([string]$Selected,[string]$Model,[string]$Effort,[string]$Profile){
+    $preserved=@();$inside=$false
+    if(Test-Path -LiteralPath $LocalConfig){foreach($line in Get-Content -LiteralPath $LocalConfig){if($line-match'^profiles:\s*$'){$inside=$true};if($inside-and$line-match'^\S'-and$line-notmatch'^profiles:'){break};if($inside){$preserved+=$line}}}
+    $lines=@('# Per-developer overrides; generated by hekate-agent.','schema_version: 2','enabled: true',"default_harness: $Selected","default_profile: $Profile",'defaults:')
+    foreach($h in HarnessNames){$m=HarnessValue $h 'default_model';$e=HarnessValue $h 'default_effort';if($h-eq$Selected){if($Model){$m=$Model};if($Effort){$e=$Effort}};$lines+="  ${h}:";$lines+="    model: $m";$lines+="    effort: $e"}
+    if($preserved.Count){$lines+='';$lines+=$preserved}
+    $tmp="$LocalConfig.tmp.$PID";[IO.File]::WriteAllLines($tmp,$lines,[Text.UTF8Encoding]::new($false));Move-Item -Force $tmp $LocalConfig
+}
 
 try {
     switch ($Command) {
         'help' { ShowHelp }
         'doctor' {
+            if($Rest.Count-gt1){Fail 'doctor accepts one harness or --strict'}
+            $strict=$false;$target=''
+            if($Rest.Count-eq1){if($Rest[0]-eq'--strict'){$strict=$true}else{$target=$Rest[0];ValidateId $target;if(-not(HasHarness $target)){Fail "unknown harness: $target"}}}
             "project: $ProjectRoot"
             "enabled: $(TopValue 'enabled')"
             "default: $(TopValue 'default_harness')"
+            $missing=$false
             foreach ($h in HarnessNames) {
-                $exe = HarnessValue $h 'command'
+                if($target-and$h-ne$target){continue}
+                $exe = HarnessValue $h 'command';$enabled=(HarnessValue $h 'enabled')-eq'true'
+                if(-not$enabled){"disabled disabled {0,-12} {1}"-f$h,$exe;if($target){$missing=$true};continue}
                 $found = Get-Command $exe -ErrorAction SilentlyContinue
-                if ($found) { "ok    {0,-12} {1}" -f $h,$found.Source }
-                else { "miss  {0,-12} command not found: {1}" -f $h,$exe }
+                if ($found) { "ok       enabled  {0,-12} {1}" -f $h,$found.Source }
+                else { "missing  enabled  {0,-12} {1}" -f $h,$exe;$missing=$true }
             }
+            if($missing-and($strict-or$target)){exit 1}
         }
         'harnesses' { ShowHarnesses }
+        'profiles' { ShowProfiles }
         'models' {
             if ($Rest.Count -ne 1) { Fail 'models requires a harness' }
             $h = $Rest[0]
@@ -153,7 +176,8 @@ try {
             if ($Rest.Count -lt 1) { Fail 'config requires show, use, or clear' }
             $action = $Rest[0]
             if ($action -eq 'show') {
-                "enabled: $(TopValue 'enabled')"; "default_harness: $(TopValue 'default_harness')"; "local_override: $LocalConfig"; ShowHarnesses
+                $profile=DefaultProfile;if(-not$profile){$profile='none'}
+                "enabled: $(TopValue 'enabled')"; "default_harness: $(TopValue 'default_harness')"; "default_profile: $profile"; "local_override: $LocalConfig"; ShowHarnesses
             } elseif ($action -eq 'clear') {
                 Remove-Item -LiteralPath $LocalConfig -Force -ErrorAction SilentlyContinue
                 "Cleared $LocalConfig"
@@ -169,17 +193,28 @@ try {
                 }
                 if ($m) { ValidateValue 'model' $m; if((HarnessValue $h 'supports_model') -ne 'true'){Fail "$h does not support model selection"} }
                 if ($e) { ValidateValue 'effort' $e; if((HarnessValue $h 'supports_effort') -ne 'true'){Fail "$h does not support effort selection"} }
-                WriteLocal $h $m $e
+                WriteLocal $h $m $e 'none'
                 "Default harness: $h (model=$(HarnessValue $h 'default_model') effort=$(HarnessValue $h 'default_effort'))"
+            } elseif ($action -eq 'use-profile') {
+                if($Rest.Count-ne2){Fail 'config use-profile requires one profile'}
+                $profile=$Rest[1];ValidateProfileId $profile;if(-not(HasProfile $profile)){Fail "unknown profile: $profile"}
+                $h=ProfileValue $profile 'harness';if(-not(HasHarness $h)){Fail "unknown harness in profile ${profile}: $h"}
+                if((HarnessValue $h 'enabled')-ne'true'){Fail "harness is disabled: $h"}
+                $m=ProfileValue $profile 'model';$e=ProfileValue $profile 'effort'
+                if($m-and(HarnessValue $h 'supports_model')-ne'true'){Fail "$h does not support model selection"}
+                if($e-and(HarnessValue $h 'supports_effort')-ne'true'){Fail "$h does not support effort selection"}
+                WriteLocal $h '' '' $profile
+                "Default profile: $profile (harness=$h model=$m effort=$e)"
             } else { Fail "unknown config action: $action" }
         }
         'run' {
-            $h=''; $m=''; $e=''; $cwd=$ProjectRoot; $task=''; $taskFile=''; $name=''; $foreground=$false
+            $profile='';$profileExplicit=$false;$h='';$harnessExplicit=$false;$m='';$modelSelected=$false;$e='';$effortSelected=$false;$cwd=$ProjectRoot;$task='';$taskFile='';$name='';$foreground=$false
             for ($i=0; $i -lt $Rest.Count; $i++) {
                 switch ($Rest[$i]) {
-                    '--harness' { $h=$Rest[++$i] }
-                    '--model' { $m=$Rest[++$i] }
-                    '--effort' { $e=$Rest[++$i] }
+                    '--profile' { $i++;if($i-ge$Rest.Count){Fail '--profile requires value'};$profile=$Rest[$i];$profileExplicit=$true }
+                    '--harness' { $i++;if($i-ge$Rest.Count){Fail '--harness requires value'};$h=$Rest[$i];$harnessExplicit=$true }
+                    '--model' { $i++;if($i-ge$Rest.Count){Fail '--model requires value'};$m=$Rest[$i];$modelSelected=$true }
+                    '--effort' { $i++;if($i-ge$Rest.Count){Fail '--effort requires value'};$e=$Rest[$i];$effortSelected=$true }
                     '--cwd' { $cwd=$Rest[++$i] }
                     '--task' { $task=$Rest[++$i] }
                     '--task-file' { $taskFile=$Rest[++$i] }
@@ -188,19 +223,25 @@ try {
                     default { Fail "unknown run option: $($Rest[$i])" }
                 }
             }
+            if($profileExplicit-and$harnessExplicit){Fail 'use either --profile or --harness'}
             if ((TopValue 'enabled') -ne 'true') { Fail 'orchestration disabled; run config use <harness>' }
             if ($task -and $taskFile) { Fail 'use only one task source' }
             if (-not $task -and -not $taskFile) { Fail 'run requires --task or --task-file' }
-            if (-not $h) { $h=TopValue 'default_harness' }
+            if(-not$profileExplicit-and-not$harnessExplicit){$profile=DefaultProfile}
+            if($profile){
+                ValidateProfileId $profile;if(-not(HasProfile $profile)){Fail "unknown profile: $profile"}
+                $h=ProfileValue $profile 'harness'
+                if(-not$modelSelected){$m=ProfileValue $profile 'model';$modelSelected=[bool]$m}
+                if(-not$effortSelected){$e=ProfileValue $profile 'effort';$effortSelected=[bool]$e}
+            }else{$profile='none';if(-not$h){$h=TopValue 'default_harness'}}
             ValidateId $h
             if (-not (HasHarness $h)) { Fail "unknown harness: $h" }
             if ((HarnessValue $h 'enabled') -ne 'true') { Fail "harness is disabled: $h" }
-            $modelExplicit=[bool]$m; $effortExplicit=[bool]$e
             if (-not $m) { $m=HarnessValue $h 'default_model' }
             if (-not $e) { $e=HarnessValue $h 'default_effort' }
             ValidateValue 'model' $m; ValidateValue 'effort' $e
-            if ($modelExplicit -and (HarnessValue $h 'supports_model') -ne 'true') { Fail "$h does not support model selection" }
-            if ($effortExplicit -and (HarnessValue $h 'supports_effort') -ne 'true') { Fail "$h does not support effort selection" }
+            if ($modelSelected -and (HarnessValue $h 'supports_model') -ne 'true') { Fail "$h does not support model selection" }
+            if ($effortSelected -and (HarnessValue $h 'supports_effort') -ne 'true') { Fail "$h does not support effort selection" }
             $exe=HarnessValue $h 'command'
             if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { Fail "command not found: $exe" }
             $cwd=ResolveSafeCwd $cwd
@@ -210,7 +251,7 @@ try {
             $dir=Join-Path $root $job; New-Item -ItemType Directory -Path $dir | Out-Null
             if ($taskFile) { Copy-Item -LiteralPath $taskFile -Destination "$dir\prompt.md" }
             else { [IO.File]::WriteAllText("$dir\prompt.md",$task+[Environment]::NewLine) }
-            foreach ($pair in @{harness=$h;model=$m;effort=$e;cwd=$cwd;job_id=$job;status='queued';created_at=[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')}.GetEnumerator()) { AtomicText "$dir\$($pair.Key)" ([string]$pair.Value) }
+            foreach ($pair in @{profile=$profile;harness=$h;model=$m;effort=$e;cwd=$cwd;job_id=$job;status='queued';created_at=[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')}.GetEnumerator()) { AtomicText "$dir\$($pair.Key)" ([string]$pair.Value) }
             if ($foreground) {
                 $job; $code=InvokeWorker $dir; Get-Content "$dir\stdout.log"
                 if (Test-Path "$dir\stderr.log") { Get-Content "$dir\stderr.log" | Write-Error -ErrorAction Continue }
@@ -234,7 +275,7 @@ try {
         'status' {
             if($Rest.Count -ne 1){Fail 'status requires job'}; $d=ResolveJob $Rest[0]
             "job: $($Rest[0])"; "status: $(EffectiveStatus $d)"
-            foreach($f in @('harness','model','effort','cwd','created_at','started_at','finished_at','exit_code','worker.pid')){if(Test-Path "$d\$f"){"${f}: $((Get-Content "$d\$f" -Raw).Trim())"}}
+            foreach($f in @('profile','harness','model','effort','cwd','created_at','started_at','finished_at','exit_code','worker.pid')){if(Test-Path "$d\$f"){"${f}: $((Get-Content "$d\$f" -Raw).Trim())"}}
         }
         'logs' {
             if($Rest.Count -lt 1){Fail 'logs requires job'}; $d=ResolveJob $Rest[0]; $file=if($Rest -contains '--stderr'){'stderr.log'}else{'stdout.log'}

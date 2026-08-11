@@ -44,15 +44,32 @@ model questions. If enabled:
 
 1. Read `.workflow/orchestration.yml → harnesses` and run
    `.workflow/bin/hekate-agent doctor` (or the PowerShell counterpart on
-   Windows) to show which CLIs are installed.
-2. Ask which enabled harness should be the project default. Built-ins are
-   `claude`, `pi`, `opencode`, `codex`, `gemini`, and `aider`; custom registry
-   entries are equally valid.
-3. Ask for its default model and, only when `supports_effort: true`, effort.
-4. Write `enabled: true`, `default_harness`, and that harness's
-   `default_model` / `default_effort` to the committed orchestration config.
-5. Explain that a developer can override these selections without changing the
-   committed config:
+   Windows). Treat only `ok` entries as installed choices; `missing` entries
+   are normal optional CLIs and `disabled` entries are unavailable by policy.
+2. Explain that the primary user-facing harness exclusively owns architecture,
+   task decomposition, profile/model choice, subagent/harness orchestration,
+   review, and final verification. Delegated children are bounded
+   executors/advisors and may not recursively delegate. The runner never infers
+   complexity or architecture from prompt text.
+3. Ask whether routing should use one default harness or arbitrary named
+   profiles. Offer `small`, `medium`, `complex`, and optional `small-deep` as a
+   recommended complexity-oriented set, but do not require these names; teams
+   may instead define profiles by role, risk, cost, provider, or another policy.
+4. For one default, ask which `ok` harness to use, then its model and, only when
+   `supports_effort: true`, effort. Write `default_profile: null`.
+5. For named routing, ask for each profile's name and an `ok` harness. Model and
+   effort are optional: omitted values fall back to that harness's defaults.
+   Choose `default_profile` (often `medium` when using the recommended set).
+6. A valid pi example, only when those models are actually available, is:
+   `small = openai-codex/gpt-5.6-terra + high`,
+   `small-deep = openai-codex/gpt-5.6-terra + xhigh`,
+   `medium = openai-codex/gpt-5.6-sol + medium`, and
+   `complex = openai-codex/gpt-5.6-sol + high`. Do not install these as
+   universal defaults.
+7. Write `enabled: true`, `default_harness`, `default_profile`, profiles, and
+   harness defaults to the committed orchestration config.
+8. Explain local selection without committed changes:
+   `.workflow/bin/hekate-agent config use-profile <name>` or
    `.workflow/bin/hekate-agent config use <harness> --model <id> --effort <level>`.
 
 CLI flags are version-sensitive. If `doctor` or a smoke test shows that an
@@ -124,12 +141,19 @@ Based on the facts, fill out drafts of all four YAML files. Then:
   - `checks.required_files_present: true`
   - `checks.required_fields_filled: true`
   - `features.*` equal to the resolved preset/custom feature map
-  - `orchestration.enabled`, `orchestration.default_harness`, config path, and
-    runner path mirror `.workflow/orchestration.yml`
+  - `orchestration.enabled`, `orchestration.default_harness`,
+    `orchestration.default_profile`, config path, and runner path mirror
+    `.workflow/orchestration.yml`
+  - `native_subagents.policy: .workflow/session.local.yml` and
+    `native_subagents.missing_or_invalid_mode: ask`
   - `required_files` and `required_non_empty_fields` mirror the blocking rules
     from `workflow.yml`
 - Create `.workflow/history/` if it does not exist.
-- Make sure `.workflow/history/` is in `.gitignore` (if not, add it).
+- Ensure `.workflow/session.local.yml` exists with `subagents.mode: ask` when no
+  local choice exists. Never overwrite an explicit local `off` / `ask` / `auto`
+  choice during bootstrap.
+- Make sure `.workflow/history/` and `.workflow/session.local.yml` are in
+  `.gitignore` (if not, add them).
 - Tell the user: "The workflow is initialized. You can now assign tasks."
 - Create the first history entry for the bootstrap itself:
   `.workflow/history/<date>-bootstrap.md`. Include the chosen preset name

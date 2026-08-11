@@ -24,8 +24,14 @@ In short:
    use that value whenever the feature is enabled.
 4. Configure optional cross-harness delegation from
    `.workflow/orchestration.yml`: ask whether to enable it and, only when
-   enabled, choose the default installed harness/model/effort. Run
-   `.workflow/bin/hekate-agent doctor`; no MCP server is involved.
+   enabled, run `.workflow/bin/hekate-agent doctor`, offer only `ok` harnesses,
+   and choose either one default harness/model/effort or arbitrary named
+   profiles. Offer `small`, `medium`, `complex`, and optional `small-deep` as a
+   recommendation, not a requirement; profile model/effort may fall back to
+   harness defaults. The primary user-facing harness exclusively owns
+   architecture, decomposition, routing and subagent/harness orchestration;
+   children cannot re-delegate. The runner does not inspect prompts. No MCP is
+   involved.
 5. Determine whether this is a new or an existing project.
 6. For an existing project, analyze dependency manifests, linter configs,
    directory structure, CI, Dockerfile, README, and commit history.
@@ -43,12 +49,16 @@ In short:
 10. Write `meta.active_preset` to `.workflow/presets.yml` and mirror it to
     `.workflow/workflow.yml → meta.preset`.
 11. Write `.workflow/status.yml` with `initialized: true`, the active preset,
-    required-check booleans, resolved feature flags, and orchestration summary.
+    required-check booleans, resolved feature flags, orchestration summary
+    including `default_profile`, and the native-subagent policy pointer.
 12. After writing all YAML files, create
      `.workflow/history/<date>-bootstrap.md` with the chosen preset, the
      resolved feature map, and any assumptions.
-13. Make sure `.workflow/history/`, `.workflow/runs/`, and
-    `.workflow/orchestration.local.yml` are in `.gitignore`.
+13. Ensure `.workflow/session.local.yml` exists with the safe default
+    `subagents.mode: ask` unless the user already chose `off` / `ask` / `auto`.
+14. Make sure `.workflow/history/`, `.workflow/runs/`,
+    `.workflow/orchestration.local.yml`, and `.workflow/session.local.yml` are
+    in `.gitignore`.
 
 Do not start any other work until the required fields from
 `workflow.yml → blocking.required_non_empty_fields` are filled in and

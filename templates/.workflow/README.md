@@ -14,6 +14,7 @@ for how the agent works.
 | `workflow.yml` | Rules for the agent itself: stages, light TDD, granular commits, history, blocking |
 | `status.yml` | Fast pre-flight index: initialized flag, active preset, resolved feature flags |
 | `orchestration.yml` | Optional declarative registry for Claude, pi, OpenCode, Codex, Gemini, Aider, and custom CLI harnesses |
+| `session.local.yml` | Gitignored native-subagent policy for the current primary session: `off`, `ask`, or `auto` |
 | `bin/hekate-agent` | POSIX long-running job controller; PowerShell counterpart: `hekate-agent.ps1` |
 | `bootstrap.md` | Initialization procedure; read only when pre-flight fails or `/init-workflow` is requested |
 | `state.yml` | Installed workflow reference and applied migration IDs |
@@ -57,6 +58,21 @@ for how the agent works.
    migrations for known managed paths, preserves unknown/custom keys,
    and creates one backup per changed file in `backups/`.
 
+## Native-subagent session policy
+
+`.workflow/session.local.yml → subagents.mode` controls whether the primary
+harness may use its own native subagents:
+
+- `off` — no native subagents;
+- `ask` — ask once before every exact proposed delegation wave (default);
+- `auto` — use native subagents at the primary's discretion.
+
+Missing or invalid mode is treated as `ask`. Only the user may authorize `off`
+or `auto`. This does not transfer architecture, orchestration, review, or final
+verification to children, and does not grant push/merge/release/destructive
+authority. External CLI jobs remain separately controlled by
+`orchestration.yml`.
+
 ## Cross-harness jobs (optional)
 
 Enable and choose project defaults during initialization, or select a local
@@ -64,8 +80,10 @@ default later:
 
 ```sh
 .workflow/bin/hekate-agent doctor
-.workflow/bin/hekate-agent config use codex --model gpt-5.4 --effort high
-.workflow/bin/hekate-agent run --task-file .workflow/history/task.md
+.workflow/bin/hekate-agent profiles
+.workflow/bin/hekate-agent config use-profile medium
+.workflow/bin/hekate-agent run --profile complex \
+  --task-file .workflow/history/task.md
 ```
 
 The last command starts a detached job and prints its id:
@@ -82,8 +100,16 @@ On Windows replace the executable with
 `.\\.workflow\\bin\\hekate-agent.ps1`. Job state is local under
 `.workflow/runs/`; local model selection is stored in the gitignored
 `.workflow/orchestration.local.yml`. There is no MCP server or daemon.
+Named profiles map arbitrary routing policies to harness/model/effort;
+`small`, `medium`, `complex`, and `small-deep` are only suggested names. The
+primary user-facing harness exclusively owns architecture, decomposition,
+profile choice, orchestration, review, and final verification. Children are
+bounded executors/advisors and cannot re-delegate. The runner never infers
+complexity from prompt text. `config use <harness>` bypasses an inherited
+profile, while explicit model/effort flags override profile values for one run.
 Registry commands and arguments are version-sensitive, so run `doctor` after
-upgrading a harness CLI.
+upgrading a harness CLI. Missing optional CLIs do not fail a normal scan; use
+`doctor <harness>` or `doctor --strict` when absence must fail.
 
 ## Commit presets
 

@@ -7,11 +7,33 @@
 # Exact non-interactive flags are CLI-version-sensitive: run `doctor` after
 # upgrading a harness and update only this registry when necessary.
 
-schema_version: 1
+schema_version: 2
 enabled: false
 default_harness: pi
+# Optional named routing profile. `null` falls back to default_harness.
+default_profile: null
 jobs_dir: .workflow/runs
 allow_external_cwd: false
+
+# Arbitrary named profiles are selected with `run --profile <name>` or locally
+# with `config use-profile <name>`. They may represent complexity, role, risk,
+# cost, provider, or another team policy; `none` and `null` are reserved. The
+# primary workflow, not this runner or a delegated child, selects routing.
+# Example values are configured during initialization so committed defaults
+# match models actually available to the team.
+profiles:
+  # small:
+  #   harness: pi
+  #   model: openai-codex/gpt-5.6-terra
+  #   effort: high
+  # medium:
+  #   harness: pi
+  #   model: openai-codex/gpt-5.6-sol
+  #   effort: medium
+  # complex:
+  #   harness: pi
+  #   model: openai-codex/gpt-5.6-sol
+  #   effort: high
 
 harnesses:
   claude:

@@ -1,0 +1,11 @@
+# Local policy for native subagents in the current user-facing harness session.
+# This file is gitignored. The user may change the mode at any time.
+# Missing/invalid mode is treated as `ask`.
+
+schema_version: 1
+
+subagents:
+  # off  — never launch native subagents
+  # ask  — ask once before each exact delegation wave (safe default)
+  # auto — the primary harness may launch native subagents at its discretion
+  mode: ask
