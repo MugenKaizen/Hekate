@@ -185,6 +185,9 @@ fi
 TPL="$SRC_ROOT/templates"
 [ -d "$TPL" ] || die "templates dir missing: $TPL"
 [ -d "$TARGET" ] || die "target dir does not exist: $TARGET"
+if [ -f "$TARGET/.workflow/workflow.yml" ] && [ "$FORCE" -eq 0 ]; then
+  die "Hekate is already installed in $TARGET; use update.sh (or rerun with --force to replace managed files)"
+fi
 
 log "target: $TARGET"
 log "agents: $AGENTS"
@@ -198,9 +201,15 @@ do_copy "$TPL/.workflow/conventions.yml"  "$TARGET/.workflow/conventions.yml"
 do_copy "$TPL/.workflow/workflow.yml"     "$TARGET/.workflow/workflow.yml"
 do_copy "$TPL/.workflow/presets.yml"      "$TARGET/.workflow/presets.yml"
 do_copy "$TPL/.workflow/status.yml"       "$TARGET/.workflow/status.yml"
+do_copy "$TPL/.workflow/orchestration.yml" "$TARGET/.workflow/orchestration.yml"
 do_copy "$TPL/.workflow/bootstrap.md"     "$TARGET/.workflow/bootstrap.md"
 do_copy "$TPL/.workflow/README.md"        "$TARGET/.workflow/README.md"
+do_copy "$TPL/.workflow/bin/hekate-agent" "$TARGET/.workflow/bin/hekate-agent"
+do_copy "$TPL/.workflow/bin/hekate-agent.ps1" "$TARGET/.workflow/bin/hekate-agent.ps1"
 do_copy "$TPL/.workflow/history/.gitkeep" "$TARGET/.workflow/history/.gitkeep"
+if [ "$DRY_RUN" -eq 0 ] && [ -f "$TARGET/.workflow/bin/hekate-agent" ]; then
+  chmod +x "$TARGET/.workflow/bin/hekate-agent"
+fi
 
 # --- adapters ------------------------------------------------------------
 if has_agent claude; then
@@ -208,6 +217,10 @@ if has_agent claude; then
   for f in "$TPL/adapters/claude/commands/"*.md; do
     [ -e "$f" ] || continue
     do_copy "$f" "$TARGET/.claude/commands/$(basename "$f")"
+  done
+  for f in "$TPL/adapters/claude/agents/"*.md; do
+    [ -e "$f" ] || continue
+    do_copy "$f" "$TARGET/.claude/agents/$(basename "$f")"
   done
   do_copy "$TPL/adapters/claude/skills/workflow/SKILL.md" \
           "$TARGET/.claude/skills/workflow/SKILL.md"

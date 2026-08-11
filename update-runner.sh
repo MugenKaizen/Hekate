@@ -294,6 +294,12 @@ update_template_file "AGENTS.md" "AGENTS.md"
 update_root_readme
 update_template_file ".workflow/bootstrap.md" ".workflow/bootstrap.md"
 update_template_file ".workflow/README.md" ".workflow/README.md"
+update_template_file ".workflow/orchestration.yml" ".workflow/orchestration.yml"
+update_template_file ".workflow/bin/hekate-agent" ".workflow/bin/hekate-agent"
+update_template_file ".workflow/bin/hekate-agent.ps1" ".workflow/bin/hekate-agent.ps1"
+if [ "$DRY_RUN" -eq 0 ] && [ -f "$TARGET/.workflow/bin/hekate-agent" ]; then
+  chmod +x "$TARGET/.workflow/bin/hekate-agent"
+fi
 
 if project_has_claude_adapter; then
   update_template_file "CLAUDE.md" "adapters/claude/CLAUDE.md"
@@ -301,6 +307,10 @@ if project_has_claude_adapter; then
   for command_file in "$RUNNER_ROOT"/templates/adapters/claude/commands/*.md; do
     [ -e "$command_file" ] || continue
     update_template_file ".claude/commands/$(basename "$command_file")" "adapters/claude/commands/$(basename "$command_file")"
+  done
+  for agent_file in "$RUNNER_ROOT"/templates/adapters/claude/agents/*.md; do
+    [ -e "$agent_file" ] || continue
+    update_template_file ".claude/agents/$(basename "$agent_file")" "adapters/claude/agents/$(basename "$agent_file")"
   done
 
   update_template_file ".claude/skills/workflow/SKILL.md" "adapters/claude/skills/workflow/SKILL.md"

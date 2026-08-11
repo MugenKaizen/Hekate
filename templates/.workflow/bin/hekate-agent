@@ -1,0 +1,354 @@
+#!/usr/bin/env sh
+# Hekate cross-harness job runner. No daemon, MCP server, eval, or dependencies.
+set -eu
+
+SELF="$0"
+case "$SELF" in /*) ;; *) SELF="$(pwd)/$SELF" ;; esac
+
+usage() {
+  cat <<'EOF'
+Usage: hekate-agent <command> [options]
+
+Commands:
+  doctor                         Check configured harness executables
+  harnesses                      List configured harnesses and defaults
+  models <harness>               Best-effort model discovery/help
+  config show                    Show effective local selection
+  config use <harness> [--model M] [--effort E]
+  config clear                   Remove personal overrides
+  run [--harness H] [--model M] [--effort E] [--cwd DIR]
+      (--task TEXT | --task-file FILE) [--name NAME] [--foreground]
+  list                           List jobs
+  status <job-id>                Show job state and metadata
+  logs <job-id> [--stderr] [--follow]
+  wait <job-id> [--timeout SEC]  Wait and return the harness exit code
+  result <job-id>                Print final stdout
+  stop <job-id>                  Terminate a running job
+
+Runs are backgrounded by default. Configuration is discovered by walking up
+from the current directory to .workflow/orchestration.yml.
+EOF
+}
+
+die() { printf 'hekate-agent: %s\n' "$*" >&2; exit 2; }
+warn() { printf 'hekate-agent: warning: %s\n' "$*" >&2; }
+
+find_root() {
+  p="$(pwd -P)"
+  while :; do
+    if [ -f "$p/.workflow/orchestration.yml" ]; then printf '%s\n' "$p"; return 0; fi
+    [ "$p" != / ] || return 1
+    p="$(dirname "$p")"
+  done
+}
+
+ROOT="${HEKATE_ROOT:-}"
+if [ -z "$ROOT" ]; then ROOT="$(find_root)" || die "cannot find .workflow/orchestration.yml"; fi
+ROOT="$(CDPATH= cd -- "$ROOT" && pwd -P)"
+CONFIG="$ROOT/.workflow/orchestration.yml"
+LOCAL_CONFIG="$ROOT/.workflow/orchestration.local.yml"
+
+unquote() {
+  printf '%s\n' "$1" | awk '{ v=$0; sub(/^[[:space:]]+/,"",v); sub(/[[:space:]]+$/,"",v); if ((substr(v,1,1)=="\"" && substr(v,length(v),1)=="\"") || (substr(v,1,1)=="\047" && substr(v,length(v),1)=="\047")) v=substr(v,2,length(v)-2); print v }'
+}
+
+top_value() {
+  file="$1" key="$2"
+  [ -f "$file" ] || return 0
+  awk -v key="$key" '$0 ~ "^" key ":[[:space:]]*" { v=$0; sub("^" key ":[[:space:]]*","",v); sub(/[[:space:]]+#.*/,"",v); gsub(/^[\" ]+|[\" ]+$/,"",v); print v; exit }' "$file"
+}
+
+nested_value() {
+  file="$1" section="$2" item="$3" key="$4"
+  [ -f "$file" ] || return 0
+  awk -v section="$section" -v item="$item" -v key="$key" '
+    $0 ~ "^" section ":[[:space:]]*$" { s=1; next }
+    s && $0 ~ "^[^[:space:]]" { exit }
+    s && $0 ~ "^  " item ":[[:space:]]*$" { i=1; next }
+    i && $0 ~ "^  [^[:space:]][^:]*:[[:space:]]*$" { exit }
+    i && $0 ~ "^    " key ":[[:space:]]*" { v=$0; sub("^    " key ":[[:space:]]*","",v); sub(/[[:space:]]+#.*/,"",v); gsub(/^[\" ]+|[\" ]+$/,"",v); print v; exit }
+  ' "$file"
+}
+
+harness_list() {
+  file="$1" item="$2" list_key="$3"
+  awk -v item="$item" -v list_key="$list_key" '
+    /^harnesses:[[:space:]]*$/ { h=1; next }
+    h && /^[^[:space:]]/ { exit }
+    h && $0 ~ "^  " item ":[[:space:]]*$" { i=1; next }
+    i && /^  [^[:space:]][^:]*:[[:space:]]*$/ { exit }
+    i && $0 ~ "^    " list_key ":[[:space:]]*$" { a=1; next }
+    a && /^      -[[:space:]]*/ { v=$0; sub(/^      -[[:space:]]*/,"",v); gsub(/^[\"]|[\"]$/,"",v); print v; next }
+    a && $0 !~ /^      / { exit }
+  ' "$file"
+}
+
+harness_args() { harness_list "$1" "$2" args; }
+
+harness_names() {
+  awk '/^harnesses:[[:space:]]*$/{h=1;next} h&&/^[^[:space:]]/{exit} h&&/^  [A-Za-z0-9_.-]+:[[:space:]]*$/{v=$0;sub(/^  /,"",v);sub(/:.*/,"",v);print v}' "$CONFIG"
+}
+
+valid_token() {
+  case "$1" in *"
+"*|*"
+"*) return 1 ;; esac
+  printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._:@/+,-]*$'
+}
+valid_id() {
+  case "$1" in *"
+"*|*"
+"*) return 1 ;; esac
+  printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$'
+}
+require_harness() { valid_id "$1" || die "invalid harness name"; nested_value "$CONFIG" harnesses "$1" command | grep -q . || die "unknown harness: $1"; }
+
+local_or_base_top() {
+  key="$1"; v="$(top_value "$LOCAL_CONFIG" "$key")"; [ -n "$v" ] || v="$(top_value "$CONFIG" "$key")"; printf '%s\n' "$v"
+}
+
+default_value() {
+  harness="$1" key="$2"
+  v="$(nested_value "$LOCAL_CONFIG" defaults "$harness" "$key")"
+  [ -n "$v" ] || v="$(nested_value "$CONFIG" harnesses "$harness" "default_$key")"
+  printf '%s\n' "$v"
+}
+
+jobs_dir() {
+  d="$(top_value "$CONFIG" jobs_dir)"; [ -n "$d" ] || d=.workflow/runs
+  case "$d" in /*) printf '%s\n' "$d" ;; *) printf '%s/%s\n' "$ROOT" "$d" ;; esac
+}
+
+atomic_write() { dst="$1"; shift; tmp="$dst.tmp.$$"; printf '%s\n' "$*" > "$tmp"; mv "$tmp" "$dst"; }
+read_field() { [ -f "$1/$2" ] && cat "$1/$2" || true; }
+
+canonical_cwd() {
+  [ -d "$1" ] || die "cwd does not exist: $1"
+  (CDPATH= cd -- "$1" && pwd -P)
+}
+
+ensure_allowed_cwd() {
+  c="$1" allow="$(top_value "$CONFIG" allow_external_cwd)"
+  [ "$allow" = true ] && return 0
+  case "$c/" in "$ROOT/"*) ;; *) die "cwd must be inside project root ($ROOT)" ;; esac
+}
+
+replace_arg() {
+  value="$1"
+  case "$value" in
+    '{model}') printf '%s\n' "$MODEL" ;;
+    '{effort}') printf '%s\n' "$EFFORT" ;;
+    '{prompt_file}') printf '%s\n' "$TASK_FILE" ;;
+    '{session_id}') printf '%s\n' "$SESSION_ID" ;;
+    '{cwd}') printf '%s\n' "$JOB_CWD" ;;
+    *'{model}'*) pre=${value%%\{model\}*}; post=${value#*\{model\}}; printf '%s%s%s\n' "$pre" "$MODEL" "$post" ;;
+    *'{effort}'*) pre=${value%%\{effort\}*}; post=${value#*\{effort\}}; printf '%s%s%s\n' "$pre" "$EFFORT" "$post" ;;
+    *'{prompt_file}'*) pre=${value%%\{prompt_file\}*}; post=${value#*\{prompt_file\}}; printf '%s%s%s\n' "$pre" "$TASK_FILE" "$post" ;;
+    *'{session_id}'*) pre=${value%%\{session_id\}*}; post=${value#*\{session_id\}}; printf '%s%s%s\n' "$pre" "$SESSION_ID" "$post" ;;
+    *'{cwd}'*) pre=${value%%\{cwd\}*}; post=${value#*\{cwd\}}; printf '%s%s%s\n' "$pre" "$JOB_CWD" "$post" ;;
+    *) printf '%s\n' "$value" ;;
+  esac
+}
+
+invoke_job() {
+  run="$1"
+  HARNESS="$(read_field "$run" harness)"; MODEL="$(read_field "$run" model)"; EFFORT="$(read_field "$run" effort)"; TASK_FILE="$run/task.md"
+  SESSION_ID="$(basename "$run")"; JOB_CWD="$(read_field "$run" cwd)"
+  command_name="$(nested_value "$CONFIG" harnesses "$HARNESS" command)"
+  delivery="$(nested_value "$CONFIG" harnesses "$HARNESS" prompt_delivery)"
+  args_file="$run/args.raw"
+  harness_args "$CONFIG" "$HARNESS" > "$args_file"
+  set --
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    arg="$(replace_arg "$raw")"
+    [ -n "$arg" ] && set -- "$@" "$arg"
+  done < "$args_file"
+  rm -f "$args_file"
+  {
+    printf '%s' "$command_name"
+    for arg in "$@"; do printf ' [%s]' "$arg"; done
+    printf '\n'
+  } > "$run/command.txt"
+  case "$delivery" in
+    stdin) "$command_name" "$@" < "$TASK_FILE" ;;
+    argument) prompt="$(cat "$TASK_FILE")"; "$command_name" "$@" "$prompt" ;;
+    file) "$command_name" "$@" ;;
+    *) die "unsupported prompt_delivery for $HARNESS: $delivery" ;;
+  esac
+}
+
+worker() {
+  run="$1"; atomic_write "$run/status" running; atomic_write "$run/worker-pid" "$$"; atomic_write "$run/started-at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  child=""
+  on_term() { [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true; atomic_write "$run/status" stopped; exit 143; }
+  trap on_term INT TERM HUP
+  set +e
+  (cd "$(read_field "$run" cwd)" && invoke_job "$run") > "$run/stdout.log" 2> "$run/stderr.log" &
+  child=$!; atomic_write "$run/pid" "$child"; wait "$child"; code=$?
+  set -e
+  atomic_write "$run/exit-code" "$code"; atomic_write "$run/finished-at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ "$code" -eq 0 ]; then atomic_write "$run/status" completed; else atomic_write "$run/status" failed; fi
+  return "$code"
+}
+
+write_local_config() {
+  selected="$1" selected_model="$2" selected_effort="$3"
+  tmp="$LOCAL_CONFIG.tmp.$$"
+  {
+    printf '# Personal overrides; generated by hekate-agent.\n'
+    printf 'schema_version: 1\n'
+    printf 'enabled: true\n'
+    printf 'default_harness: %s\n' "$selected"
+    printf 'defaults:\n'
+    for h in $(harness_names); do
+      m="$(default_value "$h" model)"; e="$(default_value "$h" effort)"
+      if [ "$h" = "$selected" ]; then [ -z "$selected_model" ] || m="$selected_model"; [ -z "$selected_effort" ] || e="$selected_effort"; fi
+      printf '  %s:\n    model: "%s"\n    effort: "%s"\n' "$h" "$m" "$e"
+    done
+  } > "$tmp"
+  mv "$tmp" "$LOCAL_CONFIG"
+}
+
+show_config() {
+  printf 'project: %s\n' "$ROOT"
+  printf 'enabled: %s\n' "$(local_or_base_top enabled)"
+  printf 'default_harness: %s\n' "$(local_or_base_top default_harness)"
+  printf 'local_override: %s\n' "$LOCAL_CONFIG"
+  for h in $(harness_names); do printf '%-10s model=%s effort=%s\n' "$h" "$(default_value "$h" model)" "$(default_value "$h" effort)"; done
+}
+
+job_path() { valid_id "$1" || die "invalid job id"; p="$(jobs_dir)/$1"; [ -d "$p" ] || die "unknown job: $1"; printf '%s\n' "$p"; }
+
+pid_is_worker() {
+  pid="$1" run="$2"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  command -v ps >/dev/null 2>&1 || return 1
+  line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  case "$line" in *"hekate-agent"*"__worker"*"$run"*) return 0 ;; *) return 1 ;; esac
+}
+
+effective_state() {
+  run="$1"; state="$(read_field "$run" status)"
+  if [ "$state" = running ] || [ "$state" = queued ]; then
+    worker_pid="$(read_field "$run" worker-pid)"
+    if [ -n "$worker_pid" ] && ! pid_is_worker "$worker_pid" "$run"; then
+      state=orphaned; atomic_write "$run/status" orphaned
+    fi
+  fi
+  printf '%s\n' "$state"
+}
+
+status_job() {
+  run="$(job_path "$1")"; state="$(effective_state "$run")"
+  printf 'id: %s\nstatus: %s\nharness: %s\nmodel: %s\neffort: %s\ncwd: %s\n' "$1" "$state" "$(read_field "$run" harness)" "$(read_field "$run" model)" "$(read_field "$run" effort)" "$(read_field "$run" cwd)"
+  [ ! -f "$run/exit-code" ] || printf 'exit_code: %s\n' "$(cat "$run/exit-code")"
+  [ ! -f "$run/started-at" ] || printf 'started_at: %s\n' "$(cat "$run/started-at")"
+  [ ! -f "$run/finished-at" ] || printf 'finished_at: %s\n' "$(cat "$run/finished-at")"
+}
+
+run_command() {
+  HARNESS="$(local_or_base_top default_harness)"; MODEL=""; EFFORT=""; CWD="$ROOT"; TASK=""; SOURCE_FILE=""; NAME=""; FOREGROUND=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --harness) [ "$#" -ge 2 ] || die "--harness needs a value"; HARNESS="$2"; shift 2 ;;
+      --model) [ "$#" -ge 2 ] || die "--model needs a value"; MODEL="$2"; shift 2 ;;
+      --effort) [ "$#" -ge 2 ] || die "--effort needs a value"; EFFORT="$2"; shift 2 ;;
+      --cwd) [ "$#" -ge 2 ] || die "--cwd needs a value"; CWD="$2"; shift 2 ;;
+      --task) [ "$#" -ge 2 ] || die "--task needs a value"; TASK="$2"; shift 2 ;;
+      --task-file) [ "$#" -ge 2 ] || die "--task-file needs a value"; SOURCE_FILE="$2"; shift 2 ;;
+      --name) [ "$#" -ge 2 ] || die "--name needs a value"; NAME="$2"; shift 2 ;;
+      --foreground) FOREGROUND=1; shift ;;
+      *) die "unknown run option: $1" ;;
+    esac
+  done
+  [ "$(local_or_base_top enabled)" = true ] || die "orchestration is disabled; run: hekate-agent config use <harness>"
+  require_harness "$HARNESS"
+  [ "$(nested_value "$CONFIG" harnesses "$HARNESS" enabled)" = true ] || die "harness is disabled: $HARNESS"
+  [ -n "$MODEL" ] || MODEL="$(default_value "$HARNESS" model)"; [ -n "$EFFORT" ] || EFFORT="$(default_value "$HARNESS" effort)"
+  valid_token "$MODEL" || die "model contains unsupported characters"; valid_token "$EFFORT" || die "effort contains unsupported characters"
+  if [ "$(nested_value "$CONFIG" harnesses "$HARNESS" supports_model)" != true ] && [ "$MODEL" != default ]; then die "$HARNESS does not support model selection"; fi
+  if [ "$(nested_value "$CONFIG" harnesses "$HARNESS" supports_effort)" != true ] && [ "$EFFORT" != default ]; then die "$HARNESS does not support effort selection"; fi
+  CWD="$(canonical_cwd "$CWD")"; ensure_allowed_cwd "$CWD"
+  if [ -n "$SOURCE_FILE" ] && [ -n "$TASK" ]; then die "use either --task or --task-file"; fi
+  if [ -n "$SOURCE_FILE" ]; then [ -f "$SOURCE_FILE" ] || die "task file not found"; else [ -n "$TASK" ] || die "--task or --task-file is required"; fi
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"; suffix="$$"; id="$stamp-$HARNESS-$suffix"
+  [ -z "$NAME" ] || { valid_id "$NAME" || die "invalid job name"; id="$stamp-$NAME-$suffix"; }
+  run="$(jobs_dir)/$id"; mkdir -p "$run"
+  printf '%s\n' "$HARNESS" > "$run/harness"; printf '%s\n' "$MODEL" > "$run/model"; printf '%s\n' "$EFFORT" > "$run/effort"; printf '%s\n' "$CWD" > "$run/cwd"; atomic_write "$run/status" queued
+  if [ -n "$SOURCE_FILE" ]; then cp "$SOURCE_FILE" "$run/task.md"; else printf '%s\n' "$TASK" > "$run/task.md"; fi
+  if [ "$FOREGROUND" -eq 1 ]; then
+    set +e; worker "$run"; code=$?; set -e
+    [ ! -f "$run/stdout.log" ] || cat "$run/stdout.log"
+    [ ! -s "$run/stderr.log" ] || cat "$run/stderr.log" >&2
+    return "$code"
+  else
+    HEKATE_ROOT="$ROOT" nohup "$SELF" __worker "$run" >/dev/null 2>&1 &
+    atomic_write "$run/launcher-pid" "$!"; printf '%s\n' "$id"
+  fi
+}
+
+cmd="${1:-help}"; [ "$#" -eq 0 ] || shift
+case "$cmd" in
+  help|-h|--help) usage ;;
+  __worker) [ "$#" -eq 1 ] || exit 2; worker "$1" ;;
+  doctor)
+    rc=0
+    for h in $(harness_names); do c="$(nested_value "$CONFIG" harnesses "$h" command)"; if command -v "$c" >/dev/null 2>&1; then printf 'ok      %-10s %s\n' "$h" "$(command -v "$c")"; else printf 'missing %-10s %s\n' "$h" "$c"; rc=1; fi; done
+    exit "$rc" ;;
+  harnesses)
+    for h in $(harness_names); do printf '%-10s command=%s model=%s effort=%s\n' "$h" "$(nested_value "$CONFIG" harnesses "$h" command)" "$(default_value "$h" model)" "$(default_value "$h" effort)"; done ;;
+  models)
+    [ "$#" -eq 1 ] || die "models requires a harness"; require_harness "$1"
+    models_command="$(nested_value "$CONFIG" harnesses "$1" models_command)"
+    [ -n "$models_command" ] || { printf 'No model discovery command configured for %s.\n' "$1"; exit 0; }
+    set --
+    models_args_file="$(jobs_dir)/.models-args.$$"; mkdir -p "$(jobs_dir)"; harness_list "$CONFIG" "$1" models_args > "$models_args_file"
+    while IFS= read -r arg || [ -n "$arg" ]; do set -- "$@" "$arg"; done < "$models_args_file"; rm -f "$models_args_file"
+    "$models_command" "$@" ;;
+  config)
+    sub="${1:-show}"; [ "$#" -eq 0 ] || shift
+    case "$sub" in
+      show) show_config ;;
+      clear) rm -f "$LOCAL_CONFIG"; printf 'cleared %s\n' "$LOCAL_CONFIG" ;;
+      use)
+        [ "$#" -ge 1 ] || die "config use requires a harness"; h="$1"; shift; require_harness "$h"; m=""; e=""
+        while [ "$#" -gt 0 ]; do case "$1" in --model) [ "$#" -ge 2 ] || die "--model needs value"; m="$2"; shift 2 ;; --effort) [ "$#" -ge 2 ] || die "--effort needs value"; e="$2"; shift 2 ;; *) die "unknown config option: $1" ;; esac; done
+        [ -z "$m" ] || valid_token "$m" || die "invalid model"; [ -z "$e" ] || valid_token "$e" || die "invalid effort"
+        [ -z "$m" ] || [ "$(nested_value "$CONFIG" harnesses "$h" supports_model)" = true ] || die "$h does not support model selection"
+        [ -z "$e" ] || [ "$(nested_value "$CONFIG" harnesses "$h" supports_effort)" = true ] || die "$h does not support effort selection"
+        write_local_config "$h" "$m" "$e"; show_config ;;
+      *) die "unknown config command: $sub" ;;
+    esac ;;
+  run) run_command "$@" ;;
+  list)
+    dir="$(jobs_dir)"; [ -d "$dir" ] || exit 0
+    for run in "$dir"/*; do [ -d "$run" ] || continue; id="$(basename "$run")"; printf '%-34s %-10s %s\n' "$id" "$(read_field "$run" status)" "$(read_field "$run" harness)"; done ;;
+  status) [ "$#" -eq 1 ] || die "status requires job id"; status_job "$1" ;;
+  logs)
+    [ "$#" -ge 1 ] || die "logs requires job id"; id="$1"; shift; stream=stdout.log; follow=0
+    while [ "$#" -gt 0 ]; do case "$1" in --stderr) stream=stderr.log ;; --follow) follow=1 ;; *) die "unknown logs option: $1" ;; esac; shift; done
+    run="$(job_path "$id")"; touch "$run/$stream"; if [ "$follow" -eq 1 ]; then tail -f "$run/$stream"; else cat "$run/$stream"; fi ;;
+  wait)
+    [ "$#" -ge 1 ] || die "wait requires job id"; id="$1"; shift; timeout=0
+    while [ "$#" -gt 0 ]; do case "$1" in --timeout) [ "$#" -ge 2 ] || die "--timeout needs seconds"; timeout="$2"; shift 2 ;; *) die "unknown wait option: $1" ;; esac; done
+    printf '%s' "$timeout" | grep -Eq '^[0-9]+$' || die "timeout must be a non-negative integer"
+    run="$(job_path "$id")"; started="$(date +%s)"
+    while :; do
+      state="$(effective_state "$run")"; case "$state" in completed|failed|stopped|orphaned) break ;; esac
+      if [ "$timeout" -gt 0 ] && [ $(( $(date +%s) - started )) -ge "$timeout" ]; then exit 124; fi
+      sleep 1
+    done
+    code="$(read_field "$run" exit-code)"; [ -n "$code" ] || code=1; exit "$code" ;;
+  result) [ "$#" -eq 1 ] || die "result requires job id"; run="$(job_path "$1")"; [ -f "$run/stdout.log" ] || die "job has no result yet"; cat "$run/stdout.log" ;;
+  stop)
+    [ "$#" -eq 1 ] || die "stop requires job id"; run="$(job_path "$1")"; state="$(effective_state "$run")"
+    case "$state" in queued|running) ;; completed|failed|stopped|orphaned) die "job is not active: $state" ;; *) die "cannot safely stop job in state: $state" ;; esac
+    worker_pid="$(read_field "$run" worker-pid)"
+    pid_is_worker "$worker_pid" "$run" || { atomic_write "$run/status" orphaned; die "worker identity cannot be verified; refusing to signal PID"; }
+    # Signal only the verified worker. Its TERM trap owns and terminates the
+    # current harness child, avoiding stale child-PID reuse.
+    kill -TERM "$worker_pid"
+    i=0; while kill -0 "$worker_pid" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    [ "$(read_field "$run" status)" = stopped ] || atomic_write "$run/status" stopped ;;
+  *) usage >&2; exit 2 ;;
+esac

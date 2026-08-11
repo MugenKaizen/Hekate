@@ -244,11 +244,17 @@ try {
     Update-AawRootReadme
     Update-AawTemplateFile '.workflow/bootstrap.md' '.workflow/bootstrap.md'
     Update-AawTemplateFile '.workflow/README.md' '.workflow/README.md'
+    Update-AawTemplateFile '.workflow/orchestration.yml' '.workflow/orchestration.yml'
+    Update-AawTemplateFile '.workflow/bin/hekate-agent' '.workflow/bin/hekate-agent'
+    Update-AawTemplateFile '.workflow/bin/hekate-agent.ps1' '.workflow/bin/hekate-agent.ps1'
 
     if (Test-AawProjectHasClaudeAdapter) {
         Update-AawTemplateFile 'CLAUDE.md' 'adapters/claude/CLAUDE.md'
         foreach ($commandFile in (Get-ChildItem -LiteralPath (Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') 'adapters/claude/commands') -Filter '*.md')) {
             Update-AawTemplateFile ('.claude/commands/' + $commandFile.Name) ('adapters/claude/commands/' + $commandFile.Name)
+        }
+        foreach ($agentFile in (Get-ChildItem -LiteralPath (Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') 'adapters/claude/agents') -Filter '*.md')) {
+            Update-AawTemplateFile ('.claude/agents/' + $agentFile.Name) ('adapters/claude/agents/' + $agentFile.Name)
         }
         Update-AawTemplateFile '.claude/skills/workflow/SKILL.md' 'adapters/claude/skills/workflow/SKILL.md'
     }
