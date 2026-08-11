@@ -76,6 +76,48 @@ You can put your own adapter into a fork of this repo under
 `templates/adapters/<agent>/` and extend `install.sh` with a `has_agent`
 section.
 
+### 3b. Adding or changing a CLI harness
+
+Cross-harness delegation is declarative in `.workflow/orchestration.yml`.
+Every registry entry specifies an executable, separate argv items, prompt
+transport (`stdin`, `argument`, or `file`), model/effort capabilities, and
+project defaults. The runner is generic; adding a harness does not require a
+pairwise adapter or code change.
+
+Supported safe placeholders in argv items are `{model}`, `{effort}`,
+`{prompt_file}`, `{session_id}`, and `{cwd}`. Commands are spawned directly,
+without `eval` or a shell. Example:
+
+```yaml
+harnesses:
+  my-agent:
+    enabled: true
+    command: my-agent
+    prompt_delivery: stdin
+    supports_model: true
+    supports_effort: false
+    default_model: vendor/model
+    default_effort: default
+    args:
+      - "run"
+      - "--model"
+      - "{model}"
+```
+
+For the complete lifecycle, safety model, built-in harness matrix, and
+troubleshooting, see [`docs/orchestration.md`](orchestration.md).
+
+Keep CLI-version-specific flags here and run
+`.workflow/bin/hekate-agent doctor` after upgrades. Per-developer choices
+belong in the gitignored local override created by:
+
+```sh
+.workflow/bin/hekate-agent config use my-agent --model vendor/other-model
+```
+
+Do not put secrets in either config. Project-local harness entries are code
+execution configuration and should only be used in trusted repositories.
+
 ### 4. A custom process
 
 For most cases, choosing a preset (`fast` / `medium` / `full`) or the
@@ -102,6 +144,11 @@ The key is to keep a single source of truth: change behavior in
 
 ## Versioning
 
-The `.workflow/*.yml` files are part of the project — commit them to
-the repo. The `.workflow/history/` directory is local and stays in
-`.gitignore`.
+The `.workflow/*.yml` files are part of the project — commit them to the repo.
+The `.workflow/history/`, `.workflow/runs/`, and
+`.workflow/orchestration.local.yml` paths are local and stay in `.gitignore`.
+
+Hekate itself uses Semantic Versioning. User-visible changes belong in
+[`CHANGELOG.md`](../CHANGELOG.md); the publication checklist is in
+[`RELEASING.md`](../RELEASING.md). Pin installation and update URLs to a tag
+for reproducible team setups.

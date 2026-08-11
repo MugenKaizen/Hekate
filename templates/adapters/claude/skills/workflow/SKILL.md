@@ -14,7 +14,8 @@ a `.workflow/` directory.
    `initialized` is not `true`, `active_preset` is `null`, or any `checks.*`
    value is not `true`, stop and run `/init-workflow`. During Bootstrap, pick
    the commit style via the preset procedure in `.workflow/bootstrap.md`, ask
-   for the commit message language separately, and update `.workflow/status.yml`.
+   for the commit message language separately, configure optional cross-harness
+   delegation from `.workflow/orchestration.yml`, and update `.workflow/status.yml`.
 
    Do not read every `.workflow/*.yml` at startup. Lazy-load detailed configs
    only when the current task needs stack, architecture, conventions, full
@@ -35,7 +36,12 @@ a `.workflow/` directory.
     events in `events.jsonl`. Large tasks also keep a checkpoint checklist in
     the same markdown file. The format is in section 4 of `AGENTS.md`.
 
-4. **Scope control.** Don't do unrequested refactors, don't add
+4. **Cross-harness delegation.** When `status.yml → orchestration.enabled` is
+   true, use `.workflow/bin/hekate-agent` for long-running external harness
+   jobs. Keep one writer per checkout, use worktrees for concurrent writers,
+   and independently verify child output. Do not use MCP.
+
+5. **Scope control.** Don't do unrequested refactors, don't add
    dependencies without discussion, and perform destructive actions only
    with explicit confirmation.
 
@@ -45,3 +51,4 @@ a `.workflow/` directory.
 - Fast pre-flight — `.workflow/status.yml`.
 - Lazy configs — `.workflow/{stack,architecture,conventions,workflow,presets}.yml`.
 - History — `.workflow/history/` (in `.gitignore`).
+- Harness routing — `.workflow/orchestration.yml` + `.workflow/bin/hekate-agent`.

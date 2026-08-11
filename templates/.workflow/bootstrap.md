@@ -33,6 +33,32 @@ Then:
 Write the chosen preset name to `.workflow/presets.yml → meta.active_preset`
 and mirror it to `.workflow/workflow.yml → meta.preset`.
 
+### 1.1 Configure optional cross-harness delegation
+
+Ask whether the project should enable long-running delegation to external CLI
+harnesses. This uses the local `.workflow/bin/hekate-agent` job controller — no
+MCP server or daemon.
+
+If disabled, keep `.workflow/orchestration.yml → enabled: false` and do not ask
+model questions. If enabled:
+
+1. Read `.workflow/orchestration.yml → harnesses` and run
+   `.workflow/bin/hekate-agent doctor` (or the PowerShell counterpart on
+   Windows) to show which CLIs are installed.
+2. Ask which enabled harness should be the project default. Built-ins are
+   `claude`, `pi`, `opencode`, `codex`, `gemini`, and `aider`; custom registry
+   entries are equally valid.
+3. Ask for its default model and, only when `supports_effort: true`, effort.
+4. Write `enabled: true`, `default_harness`, and that harness's
+   `default_model` / `default_effort` to the committed orchestration config.
+5. Explain that a developer can override these selections without changing the
+   committed config:
+   `.workflow/bin/hekate-agent config use <harness> --model <id> --effort <level>`.
+
+CLI flags are version-sensitive. If `doctor` or a smoke test shows that an
+installed harness changed its non-interactive flags, update only its declarative
+registry entry rather than the runner.
+
 ## 2. Identify the project type
 
 - **New** (empty repo / just `git init`) → *interview* mode.
@@ -98,6 +124,8 @@ Based on the facts, fill out drafts of all four YAML files. Then:
   - `checks.required_files_present: true`
   - `checks.required_fields_filled: true`
   - `features.*` equal to the resolved preset/custom feature map
+  - `orchestration.enabled`, `orchestration.default_harness`, config path, and
+    runner path mirror `.workflow/orchestration.yml`
   - `required_files` and `required_non_empty_fields` mirror the blocking rules
     from `workflow.yml`
 - Create `.workflow/history/` if it does not exist.
