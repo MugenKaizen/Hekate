@@ -6,6 +6,11 @@ All notable changes to Hekate are documented here. The project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Tag-pinned installation examples now pass the same tag to the installer's
+  `--ref` / `-Ref` option instead of downloading templates from `main`.
+
 ## [0.1.0-beta.1] - 2026-08-11
 
 ### Added
