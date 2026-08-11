@@ -1,0 +1,131 @@
+# Cross-harness delegation. This file is project configuration and may be committed.
+# Personal choices made by `hekate-agent config use` are written to the
+# gitignored `.workflow/orchestration.local.yml`.
+#
+# Arguments are executed directly, never through `sh -c`/`eval`. Supported
+# placeholders: {model}, {effort}, {prompt_file}, {session_id}, {cwd}.
+# Exact non-interactive flags are CLI-version-sensitive: run `doctor` after
+# upgrading a harness and update only this registry when necessary.
+
+schema_version: 1
+enabled: false
+default_harness: pi
+jobs_dir: .workflow/runs
+allow_external_cwd: false
+
+harnesses:
+  claude:
+    enabled: true
+    command: claude
+    prompt_delivery: stdin
+    supports_model: true
+    supports_effort: true
+    default_model: sonnet
+    default_effort: high
+    models_command: claude
+    models_args:
+      - --help
+    args:
+      - -p
+      - --model
+      - "{model}"
+      - --effort
+      - "{effort}"
+      - --permission-mode
+      - auto
+      - --output-format
+      - text
+      - --no-session-persistence
+
+  pi:
+    enabled: true
+    command: pi
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: true
+    default_model: anthropic/claude-sonnet-4-5
+    default_effort: high
+    models_command: pi
+    models_args:
+      - --list-models
+    args:
+      - -p
+      - --no-session
+      - --model
+      - "{model}"
+      - --thinking
+      - "{effort}"
+
+  opencode:
+    enabled: true
+    command: opencode
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: true
+    default_model: anthropic/claude-sonnet-4-5
+    default_effort: high
+    models_command: opencode
+    models_args:
+      - models
+    args:
+      - run
+      - --model
+      - "{model}"
+      - --variant
+      - "{effort}"
+
+  codex:
+    enabled: true
+    command: codex
+    prompt_delivery: stdin
+    supports_model: true
+    supports_effort: true
+    default_model: gpt-5.4
+    default_effort: high
+    models_command: codex
+    models_args:
+      - --help
+    args:
+      - exec
+      - --model
+      - "{model}"
+      - --config
+      - "model_reasoning_effort={effort}"
+      - --full-auto
+      - -
+
+  gemini:
+    enabled: true
+    command: gemini
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: false
+    default_model: gemini-2.5-pro
+    default_effort: default
+    models_command: gemini
+    models_args:
+      - --help
+    args:
+      - --model
+      - "{model}"
+      - --approval-mode
+      - auto_edit
+      - --prompt
+
+  aider:
+    enabled: true
+    command: aider
+    prompt_delivery: file
+    supports_model: true
+    supports_effort: false
+    default_model: sonnet
+    default_effort: default
+    models_command: aider
+    models_args:
+      - --list-models
+    args:
+      - --model
+      - "{model}"
+      - --yes-always
+      - --message-file
+      - "{prompt_file}"

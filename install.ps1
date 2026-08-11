@@ -156,19 +156,25 @@ try {
     $tpl = Join-Path $srcRoot 'templates'
     if (-not (Test-Path -LiteralPath $tpl)) { Throw-Aaw "templates dir missing: $tpl" }
     if (-not (Test-Path -LiteralPath $Target)) { Throw-Aaw "target dir does not exist: $Target" }
+    if ((Test-Path -LiteralPath (Join-AawPath $Target '.workflow/workflow.yml')) -and -not $Force) {
+        Throw-Aaw "Hekate is already installed in $Target; use update.ps1 (or rerun with -Force to replace managed files)"
+    }
 
     Write-AawLog "target: $Target"
     Write-AawLog "agents: $Agents"
     if ($DryRun) { Write-AawLog 'DRY RUN - no files will be written' }
 
     Copy-AawInstallItem (Join-AawPath $tpl 'AGENTS.md') (Join-AawPath $Target 'AGENTS.md')
-    foreach ($rel in @('.workflow/stack.yml','.workflow/architecture.yml','.workflow/conventions.yml','.workflow/workflow.yml','.workflow/presets.yml','.workflow/status.yml','.workflow/bootstrap.md','.workflow/README.md','.workflow/history/.gitkeep')) {
+    foreach ($rel in @('.workflow/stack.yml','.workflow/architecture.yml','.workflow/conventions.yml','.workflow/workflow.yml','.workflow/presets.yml','.workflow/status.yml','.workflow/orchestration.yml','.workflow/bootstrap.md','.workflow/README.md','.workflow/bin/hekate-agent','.workflow/bin/hekate-agent.ps1','.workflow/history/.gitkeep')) {
         Copy-AawInstallItem (Join-AawPath $tpl $rel) (Join-AawPath $Target $rel)
     }
     if (Test-AawAgent 'claude') {
         Copy-AawInstallItem (Join-AawPath $tpl 'adapters/claude/CLAUDE.md') (Join-AawPath $Target 'CLAUDE.md')
         foreach ($file in (Get-ChildItem -LiteralPath (Join-AawPath $tpl 'adapters/claude/commands') -Filter '*.md')) {
             Copy-AawInstallItem $file.FullName (Join-AawPath $Target ('.claude/commands/' + $file.Name))
+        }
+        foreach ($file in (Get-ChildItem -LiteralPath (Join-AawPath $tpl 'adapters/claude/agents') -Filter '*.md')) {
+            Copy-AawInstallItem $file.FullName (Join-AawPath $Target ('.claude/agents/' + $file.Name))
         }
         Copy-AawInstallItem (Join-AawPath $tpl 'adapters/claude/skills/workflow/SKILL.md') (Join-AawPath $Target '.claude/skills/workflow/SKILL.md')
     }
