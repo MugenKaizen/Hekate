@@ -13,6 +13,8 @@ for how the agent works.
 | `conventions.yml` | Code style, naming, tests, commits |
 | `workflow.yml` | Rules for the agent itself: stages, light TDD, granular commits, history, blocking |
 | `status.yml` | Fast pre-flight index: initialized flag, active preset, resolved feature flags |
+| `orchestration.yml` | Optional declarative registry for Claude, pi, OpenCode, Codex, Gemini, Aider, and custom CLI harnesses |
+| `bin/hekate-agent` | POSIX long-running job controller; PowerShell counterpart: `hekate-agent.ps1` |
 | `bootstrap.md` | Initialization procedure; read only when pre-flight fails or `/init-workflow` is requested |
 | `state.yml` | Installed workflow reference and applied migration IDs |
 | `history/` | Local task history (in `.gitignore`) |
@@ -54,6 +56,34 @@ for how the agent works.
 7. **Workflow updates are conservative.** The updater runs ordered
    migrations for known managed paths, preserves unknown/custom keys,
    and creates one backup per changed file in `backups/`.
+
+## Cross-harness jobs (optional)
+
+Enable and choose project defaults during initialization, or select a local
+default later:
+
+```sh
+.workflow/bin/hekate-agent doctor
+.workflow/bin/hekate-agent config use codex --model gpt-5.4 --effort high
+.workflow/bin/hekate-agent run --task-file .workflow/history/task.md
+```
+
+The last command starts a detached job and prints its id:
+
+```sh
+.workflow/bin/hekate-agent status <job-id>
+.workflow/bin/hekate-agent logs <job-id> --follow
+.workflow/bin/hekate-agent wait <job-id> --timeout 3600
+.workflow/bin/hekate-agent result <job-id>
+.workflow/bin/hekate-agent stop <job-id>
+```
+
+On Windows replace the executable with
+`.\\.workflow\\bin\\hekate-agent.ps1`. Job state is local under
+`.workflow/runs/`; local model selection is stored in the gitignored
+`.workflow/orchestration.local.yml`. There is no MCP server or daemon.
+Registry commands and arguments are version-sensitive, so run `doctor` after
+upgrading a harness CLI.
 
 ## Commit presets
 

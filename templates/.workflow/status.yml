@@ -20,6 +20,12 @@ features:
   scope_control: true
   three_branch_model: false
 
+orchestration:
+  enabled: false
+  default_harness: pi
+  config: .workflow/orchestration.yml
+  runner: .workflow/bin/hekate-agent
+
 lazy_load:
   stack: .workflow/stack.yml
   architecture: .workflow/architecture.yml
@@ -27,6 +33,7 @@ lazy_load:
   workflow_rules: .workflow/workflow.yml
   presets: .workflow/presets.yml
   bootstrap: .workflow/bootstrap.md
+  orchestration: .workflow/orchestration.yml
 
 required_files:
   - .workflow/stack.yml

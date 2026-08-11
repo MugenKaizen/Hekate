@@ -23,3 +23,8 @@ Slash commands for convenience:
 - `/init-workflow` — initialize or complete `.workflow/*.yml`
 - `/analyze` — analyze a task (stage 3.1 from `AGENTS.md`)
 - `/plan` — produce a plan (stage 3.3)
+- `/harness` — start or manage a long-running job in another configured CLI harness
+
+When `.workflow/status.yml → orchestration.enabled` is true, prefer the
+project-local `.workflow/bin/hekate-agent` controller over ad-hoc nested CLI
+commands. Claude may use the `harness-orchestrator` custom subagent for this.

@@ -1,5 +1,8 @@
 # Hekate
 
+[![GitHub release](https://img.shields.io/github/v/release/MugenKaizen/Hekate?include_prereleases)](https://github.com/MugenKaizen/Hekate/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > **Status: early-stage, work in progress.** The workflow is still evolving
 > and undergoing early testing. Expect rough edges, breaking changes, and
 > missing pieces. Feedback and issue reports are very welcome.
@@ -42,6 +45,10 @@ and any other agent that reads `AGENTS.md`.
 - **Local task history** in `.workflow/history/` (in `.gitignore`), so
   the agent remembers context across sessions, including checkpoint checklists
   for large tasks.
+- **Optional cross-harness orchestration without MCP**: any parent agent can
+  launch long-running Claude Code, pi, OpenCode, Codex, Gemini CLI, Aider, or
+  custom CLI jobs with project/local model and effort selection, persistent
+  status/logs/results, and no daemon.
 
 ## Goals
 
@@ -74,6 +81,17 @@ actually helps in practice is something only real use will show.
   vendor or editor. A foundation of plain Markdown and YAML is meant to
   keep things easy to carry across tools and projects.
 
+## Documentation
+
+- [Cross-harness orchestration](docs/orchestration.md)
+- [Customization](docs/customization.md)
+- [Design philosophy](docs/philosophy.md)
+- [Changelog](CHANGELOG.md)
+- [Release process](RELEASING.md)
+
+Release notes for `v0.1.0-beta.1` live in
+[`docs/releases/v0.1.0-beta.1.md`](docs/releases/v0.1.0-beta.1.md).
+
 ## Installation
 
 In the root of the target project:
@@ -87,6 +105,9 @@ On Windows PowerShell 5.1+:
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.ps1)))
 ```
+
+For reproducible installation, replace `main` with a published tag such as
+`v0.1.0-beta.1`.
 
 Or with flags:
 
@@ -113,7 +134,9 @@ Supported flags:
 | `--source=<path>` | Local copy of the repository (for debugging). |
 
 PowerShell accepts the same options as named parameters: `-Target`, `-Agents`,
-`-Force`, `-DryRun`, `-Ref`, `-Source`, and `-Repo`.
+`-Force`, `-DryRun`, `-Ref`, `-Source`, and `-Repo`. If Hekate is already
+installed, the installer refuses to rewrite migration state; use the update
+command instead (or explicit `--force` / `-Force` to replace managed files).
 
 What will appear in the project:
 
@@ -121,7 +144,8 @@ What will appear in the project:
 AGENTS.md                          # single source of truth
 CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 .cursor/rules/workflow.mdc         # Cursor adapter
-.claude/commands/                  # /init-workflow, /analyze, /plan
+.claude/commands/                  # /init-workflow, /analyze, /plan, /harness
+.claude/agents/                    # harness-orchestrator custom subagent
 .claude/skills/workflow/SKILL.md
 .workflow/stack.yml                # fill in at initialization
 .workflow/architecture.yml
@@ -129,12 +153,16 @@ CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 .workflow/workflow.yml
 .workflow/presets.yml              # active preset + feature registry
 .workflow/status.yml               # fast pre-flight index for agents
+.workflow/orchestration.yml        # optional harness registry and project defaults
+.workflow/bin/hekate-agent         # POSIX background job controller
+.workflow/bin/hekate-agent.ps1     # PowerShell counterpart
 .workflow/bootstrap.md             # initialization procedure
 .workflow/state.yml                # installed snapshot + applied migrations
 .workflow/README.md
 .workflow/history/                 # gitignored
+.workflow/runs/                    # gitignored delegated job metadata/logs
 .workflow/backups/                 # gitignored safety backups for updates
-.gitignore                         # appended: .workflow/history/, .workflow/backups/
+.gitignore                         # also ignores runs and local orchestration overrides
 ```
 
 ## Updating an existing installation
@@ -224,13 +252,48 @@ Update behavior:
    / `custom`. The preset controls which stages are mandatory (options,
    light TDD, granular commits, …). `medium` is the recommended default;
    `custom` walks through every feature individually.
-4. The agent then decides the project mode on its own:
+4. Optionally enable cross-harness delegation and select its default installed
+   harness/model/effort. Developers can later override their local selection
+   with `.workflow/bin/hekate-agent config use ...`.
+5. The agent then decides the project mode on its own:
    - **New project** → will ask questions about the stack, architecture,
      and conventions.
    - **Existing project** → will read manifests/configs/structure and propose
      YAML drafts, asking for confirmation.
-5. Once the required fields are filled in, the agent writes `.workflow/status.yml`
+6. Once the required fields are filled in, the agent writes `.workflow/status.yml`
    and is ready to work by the cycle.
+
+## Cross-harness delegation
+
+When enabled during initialization, the same project-local command works from
+Claude Code, pi, OpenCode, Codex, Gemini, or any other parent capable of running
+a shell command:
+
+```sh
+.workflow/bin/hekate-agent doctor
+.workflow/bin/hekate-agent config use pi \
+  --model openai-codex/gpt-5.4 --effort high
+job_id=$(.workflow/bin/hekate-agent run --task-file /tmp/task.md)
+.workflow/bin/hekate-agent wait "$job_id" --timeout 3600
+.workflow/bin/hekate-agent result "$job_id"
+```
+
+Runs are detached by default and persist under gitignored `.workflow/runs/`.
+The committed registry is `.workflow/orchestration.yml`; local selection goes
+to `.workflow/orchestration.local.yml`. Registry commands and flags are
+version-sensitive and should be checked with `hekate-agent doctor` after CLI
+upgrades. There is no MCP server or daemon. Parent agents still own diff review
+and verification, and concurrent writers must use separate worktrees.
+
+## Development checks
+
+```sh
+sh -n install.sh update.sh update-runner.sh migrations/*.sh \
+  templates/.workflow/bin/hekate-agent tests/run.sh
+./tests/run.sh
+```
+
+Tests use fake harness executables and never contact paid model APIs.
 
 ## Philosophy
 
@@ -247,11 +310,14 @@ update-runner.sh        # versioned update runner from the downloaded snapshot
 lib/
   update-common.sh      # shared helpers for runner and migrations
 migrations/             # ordered schema migrations for .workflow/*.yml
+tests/                  # fake-harness integration and installer/update smoke tests
+CHANGELOG.md             # version history
+RELEASING.md             # release checklist
 templates/              # what gets deployed into the project
   AGENTS.md
   .workflow/            # YAML configs + status index
   adapters/
-    claude/             # CLAUDE.md, commands/, skills/
+    claude/             # CLAUDE.md, commands/, agents/, skills/
     cursor/             # .cursor/rules/
     codex/              # reference (Codex reads AGENTS.md directly)
   gitignore.snippet
@@ -269,6 +335,7 @@ flowchart LR
         ST[.workflow/stack.yml]
         AR[.workflow/architecture.yml]
         CV[.workflow/conventions.yml]
+        OR[.workflow/orchestration.yml]
     end
 
     subgraph ADP["Adapters (point to AGENTS.md)"]
@@ -283,6 +350,9 @@ flowchart LR
     end
 
     HIST[(".workflow/history/<br/>gitignored")]
+    JOBS[(".workflow/runs/<br/>gitignored")]
+    RUNNER[.workflow/bin/hekate-agent]
+    CHILD([External harness])
     AGENT([AI agent])
 
     CL --> AG
@@ -290,7 +360,7 @@ flowchart LR
     CX --> AG
     SK --> AG
     CMD --> AG
-    AG --> PR & WF & ST & AR & CV
+    AG --> PR & WF & ST & AR & CV & OR
 
     AGENT -->|reads| CL
     AGENT -->|reads| CU
@@ -298,6 +368,10 @@ flowchart LR
     AGENT -->|reads| SK
     AGENT -->|reads| CMD
     AGENT <-->|read/write| HIST
+    AGENT -->|optional delegation| RUNNER
+    RUNNER --> OR
+    RUNNER <-->|status/logs/results| JOBS
+    RUNNER --> CHILD
 ```
 
 ## License

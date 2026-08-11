@@ -28,7 +28,8 @@ point here.
 4. If the fast check passes — proceed to **Task workflow**. When deciding which
    stages are mandatory, use `status.yml → features`. Read
    `.workflow/workflow.yml` only if a needed rule is not represented in
-   `status.yml`.
+   `status.yml`. Use `status.yml → orchestration` to decide whether external
+   harness routing is available.
 
 ### 1.1 Lazy-loading rules
 
@@ -47,6 +48,8 @@ current task needs the information:
   workflow feature customization.
 - `.workflow/bootstrap.md` — only when the fast pre-flight check fails or the
   user explicitly asks to initialize the workflow.
+- `.workflow/orchestration.yml` — only when `status.yml → orchestration.enabled`
+  is true and the task needs cross-harness delegation or model routing.
 
 ---
 
@@ -151,6 +154,44 @@ Wait for plan approval before executing.
 - Append an event to `.workflow/history/events.jsonl`:
   `{"ts": "<ISO-8601>", "task_slug": "<slug>", "type": "verified", "summary": "<1 line>"}`.
 
+### 3.6. Optional cross-harness delegation
+
+When `.workflow/status.yml → orchestration.enabled` is `true`, any current
+parent harness may delegate a substantial task to any configured child harness
+through the project-local job controller:
+
+```sh
+.workflow/bin/hekate-agent run --harness pi --model <model> --effort high \
+  --task-file <self-contained-task.md>
+```
+
+On Windows use:
+
+```powershell
+.\.workflow\bin\hekate-agent.ps1 run --harness pi --model <model> `
+  --effort high --task-file <self-contained-task.md>
+```
+
+Runs are background by default and return a job id. Use `status`, `logs`,
+`wait`, `result`, and `stop` with that id. `config use` changes the local
+per-developer default without modifying the committed project config. Read
+`.workflow/orchestration.yml` for the declarative registry only when routing a
+task.
+
+Delegation rules:
+
+- The task file must be self-contained: scope, allowed writes, expected output,
+  and verification commands.
+- Never run two writer agents in the same checkout. Concurrent writers require
+  separate git worktrees; advisory/review agents should be explicitly read-only.
+- A child result is evidence, not acceptance. The parent remains responsible for
+  reviewing the diff, running verification, and making product/scope decisions.
+- Do not bypass permissions or broaden cwd access merely to make unattended work
+  succeed. The controller restricts cwd to the project root unless the committed
+  config deliberately opts out.
+- Harness flags are version-sensitive. Use `hekate-agent doctor` after CLI
+  upgrades and update the registry rather than inventing shell wrappers.
+
 ---
 
 ## 4. History (.workflow/history/)
@@ -236,4 +277,6 @@ Allowed `type` values: `started | analyzed | options_proposed | planned | checkp
 - `.workflow/workflow.yml` — agent's working rules
 - `.workflow/status.yml` — fast pre-flight index; read before any work
 - `.workflow/bootstrap.md` — initialization procedure; read only when pre-flight fails
+- `.workflow/orchestration.yml` — optional cross-harness registry and project defaults
+- `.workflow/bin/hekate-agent` — persistent background job controller (no MCP/daemon)
 - `.workflow/README.md` — brief cheat sheet
