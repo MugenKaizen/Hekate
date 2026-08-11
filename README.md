@@ -45,10 +45,13 @@ and any other agent that reads `AGENTS.md`.
 - **Local task history** in `.workflow/history/` (in `.gitignore`), so
   the agent remembers context across sessions, including checkpoint checklists
   for large tasks.
+- **User-controlled native subagents**: a gitignored session policy supports
+  `off`, per-wave `ask` (safe default), or primary-controlled `auto`. The main
+  harness always retains architecture, orchestration, review, and acceptance.
 - **Optional cross-harness orchestration without MCP**: any parent agent can
   launch long-running Claude Code, pi, OpenCode, Codex, Gemini CLI, Aider, or
-  custom CLI jobs with project/local model and effort selection, persistent
-  status/logs/results, and no daemon.
+  custom CLI jobs with named task-complexity profiles, project/local model and
+  effort selection, persistent status/logs/results, and no daemon.
 
 ## Goals
 
@@ -154,7 +157,7 @@ AGENTS.md                          # single source of truth
 CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 .cursor/rules/workflow.mdc         # Cursor adapter
 .claude/commands/                  # /init-workflow, /analyze, /plan, /harness
-.claude/agents/                    # harness-orchestrator custom subagent
+.claude/agents/                    # optional harness job lifecycle monitor
 .claude/skills/workflow/SKILL.md
 .workflow/stack.yml                # fill in at initialization
 .workflow/architecture.yml
@@ -163,6 +166,7 @@ CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 .workflow/presets.yml              # active preset + feature registry
 .workflow/status.yml               # fast pre-flight index for agents
 .workflow/orchestration.yml        # optional harness registry and project defaults
+.workflow/session.local.yml         # gitignored native-subagent policy: off/ask/auto
 .workflow/bin/hekate-agent         # POSIX background job controller
 .workflow/bin/hekate-agent.ps1     # PowerShell counterpart
 .workflow/bootstrap.md             # initialization procedure
@@ -171,7 +175,7 @@ CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 .workflow/history/                 # gitignored
 .workflow/runs/                    # gitignored delegated job metadata/logs
 .workflow/backups/                 # gitignored safety backups for updates
-.gitignore                         # also ignores runs and local orchestration overrides
+.gitignore                         # also ignores runs, session policy, and local overrides
 ```
 
 ## Updating an existing installation
@@ -261,33 +265,45 @@ Update behavior:
    / `custom`. The preset controls which stages are mandatory (options,
    light TDD, granular commits, …). `medium` is the recommended default;
    `custom` walks through every feature individually.
-4. Optionally enable cross-harness delegation and select its default installed
-   harness/model/effort. Developers can later override their local selection
-   with `.workflow/bin/hekate-agent config use ...`.
-5. The agent then decides the project mode on its own:
+4. Native subagents default to `ask`: the primary must obtain one user approval
+   for each exact delegation wave. Change `.workflow/session.local.yml` to
+   `off` or explicitly authorize `auto` for the local session.
+5. Optionally enable cross-harness delegation and choose either one installed
+   harness/model/effort default or arbitrary named routing profiles. The
+   initializer offers `small` / `medium` / `complex` / `small-deep` as a
+   recommended set, not a requirement. Developers can later select a local
+   profile with `config use-profile` or bypass profiles with `config use`.
+6. The agent then decides the project mode on its own:
    - **New project** → will ask questions about the stack, architecture,
      and conventions.
    - **Existing project** → will read manifests/configs/structure and propose
      YAML drafts, asking for confirmation.
-6. Once the required fields are filled in, the agent writes `.workflow/status.yml`
+7. Once the required fields are filled in, the agent writes `.workflow/status.yml`
    and is ready to work by the cycle.
 
 ## Cross-harness delegation
 
 When enabled during initialization, the same project-local command works from
-Claude Code, pi, OpenCode, Codex, Gemini, or any other parent capable of running
-a shell command:
+Claude Code, pi, OpenCode, Codex, Gemini, or any other primary user-facing agent
+capable of running a shell command. That primary retains architecture,
+decomposition, routing, orchestration, review, and final verification:
 
 ```sh
 .workflow/bin/hekate-agent doctor
-.workflow/bin/hekate-agent config use pi \
-  --model openai-codex/gpt-5.4 --effort high
-job_id=$(.workflow/bin/hekate-agent run --task-file /tmp/task.md)
+.workflow/bin/hekate-agent profiles
+.workflow/bin/hekate-agent config use-profile medium
+job_id=$(.workflow/bin/hekate-agent run --profile complex \
+  --task-file /tmp/task.md)
 .workflow/bin/hekate-agent wait "$job_id" --timeout 3600
 .workflow/bin/hekate-agent result "$job_id"
 ```
 
 Runs are detached by default and persist under gitignored `.workflow/runs/`.
+Named profiles map arbitrary task classes to a harness/model/effort tuple.
+Typical classes are `small`, `medium`, `complex`, plus optional `small-deep`;
+the parent agent classifies the task, and the runner never guesses from prompt
+text. Explicit `--model` and `--effort` override a profile for one run.
+
 The committed registry is `.workflow/orchestration.yml`; local selection goes
 to `.workflow/orchestration.local.yml`. Registry commands and flags are
 version-sensitive and should be checked with `hekate-agent doctor` after CLI

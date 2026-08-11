@@ -6,8 +6,25 @@ All notable changes to Hekate are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Arbitrary named task-routing profiles with `run --profile`, local
+  `config use-profile`, explicit override precedence, and persisted profile
+  metadata.
+- Optional/targeted/strict harness doctor modes.
+- Explicit primary-harness ownership of architecture, decomposition, routing,
+  orchestration, review, and final verification.
+- Gitignored native-subagent session policy with `off`, per-wave `ask`, and
+  explicitly authorized `auto` modes, plus migration 005 for existing installs.
+
 ### Fixed
 
+- Normal doctor scans no longer fail merely because optional harness CLIs are
+  absent.
+- Exact profile lookup prevents dotted names from aliasing another YAML entry;
+  quoted values and reserved sentinels are handled consistently.
+- Migration 004 preserves forward schema versions and handles customized status
+  blocks without a `default_harness` anchor.
 - Tag-pinned installation examples now pass the same tag to the installer's
   `--ref` / `-Ref` option instead of downloading templates from `main`.
 

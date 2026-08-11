@@ -76,7 +76,22 @@ You can put your own adapter into a fork of this repo under
 `templates/adapters/<agent>/` and extend `install.sh` with a `has_agent`
 section.
 
-### 3b. Adding or changing a CLI harness
+### 3b. Native-subagent session policy
+
+`.workflow/session.local.yml` is gitignored and controls whether the primary
+harness may use its native subagents:
+
+```yaml
+subagents:
+  mode: ask  # off | ask | auto
+```
+
+`ask` is the safe default and requires one user approval for each exact proposed
+wave, not one prompt per child. Missing or invalid mode also means `ask`. Only
+an explicit user choice may enable `auto`; it does not grant push, merge,
+release, destructive, or recursive-delegation authority.
+
+### 3c. Adding or changing a CLI harness
 
 Cross-harness delegation is declarative in `.workflow/orchestration.yml`.
 Every registry entry specifies an executable, separate argv items, prompt
@@ -107,16 +122,36 @@ harnesses:
 For the complete lifecycle, safety model, built-in harness matrix, and
 troubleshooting, see [`docs/orchestration.md`](orchestration.md).
 
+Named `profiles:` can map arbitrary routing policies (complexity, role, risk,
+cost, provider, or team-specific classes) to a harness/model/effort without
+changing runner code. `none` and `null` are reserved sentinels and cannot be
+profile names. Profile model and effort are optional and fall back to harness
+defaults:
+
+```yaml
+default_profile: medium
+profiles:
+  medium:
+    harness: my-agent
+    model: vendor/model
+    effort: high
+```
+
 Keep CLI-version-specific flags here and run
 `.workflow/bin/hekate-agent doctor` after upgrades. Per-developer choices
 belong in the gitignored local override created by:
 
 ```sh
+.workflow/bin/hekate-agent config use-profile medium
+# Or bypass profiles:
 .workflow/bin/hekate-agent config use my-agent --model vendor/other-model
 ```
 
 Do not put secrets in either config. Project-local harness entries are code
-execution configuration and should only be used in trusted repositories.
+execution configuration and should only be used in trusted repositories. The
+primary user-facing harness owns architecture, decomposition, route selection,
+orchestration, review, and final verification; custom children remain bounded
+executors/advisors and must not recursively delegate.
 
 ### 4. A custom process
 
@@ -145,8 +180,9 @@ The key is to keep a single source of truth: change behavior in
 ## Versioning
 
 The `.workflow/*.yml` files are part of the project — commit them to the repo.
-The `.workflow/history/`, `.workflow/runs/`, and
-`.workflow/orchestration.local.yml` paths are local and stay in `.gitignore`.
+The `.workflow/history/`, `.workflow/runs/`,
+`.workflow/orchestration.local.yml`, and `.workflow/session.local.yml` paths are
+local and stay in `.gitignore`.
 
 Hekate itself uses Semantic Versioning. User-visible changes belong in
 [`CHANGELOG.md`](../CHANGELOG.md); the publication checklist is in

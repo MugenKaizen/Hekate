@@ -8,6 +8,63 @@ PROJECT="$TMP/project"
 FAKEBIN="$TMP/bin"
 mkdir -p "$PROJECT/.workflow/bin" "$FAKEBIN"
 cp "$ROOT/templates/.workflow/orchestration.yml" "$PROJECT/.workflow/orchestration.yml"
+awk '
+  /^default_profile:/ { print "default_profile: medium"; next }
+  /^  claude:[[:space:]]*$/ {
+    print "  fakeXcli:"
+    print "    enabled: true"
+    print "    command: claude"
+    print "    prompt_delivery: stdin"
+    print "    supports_model: true"
+    print "    supports_effort: true"
+    print "    default_model: fake/alias-harness"
+    print "    default_effort: low"
+    print "    args:"
+    print "  fake.cli:"
+    print "    enabled: true"
+    print "    command: pi"
+    print "    prompt_delivery: argument"
+    print "    supports_model: true"
+    print "    supports_effort: true"
+    print "    default_model: fake/dotted-harness"
+    print "    default_effort: high"
+    print "    args:"
+    print
+  }
+  /^profiles:[[:space:]]*$/ {
+    print
+    print "  small:"
+    print "    harness: pi"
+    print "    model: fake/terra"
+    print "    effort: high"
+    print "  medium:"
+    print "    harness: pi"
+    print "    model: fake/sol"
+    print "    effort: medium"
+    print "  no-effort:"
+    print "    harness: gemini"
+    print "    effort: high"
+    print "  aXb:"
+    print "    harness: pi"
+    print "    model: fake/alias"
+    print "    effort: low"
+    print "  a.b:"
+    print "    harness: pi"
+    print "    model: fake/dotted"
+    print "    effort: high"
+    print "  quoted:"
+    print "    harness: \047pi\047"
+    print "    model: \047fake/quoted\047"
+    print "    effort: \047high\047"
+    print "  none:"
+    print "    harness: pi"
+    print "    model: fake/reserved"
+    print "    effort: high"
+    next
+  }
+  { print }
+' "$PROJECT/.workflow/orchestration.yml" > "$PROJECT/.workflow/orchestration.yml.tmp"
+mv "$PROJECT/.workflow/orchestration.yml.tmp" "$PROJECT/.workflow/orchestration.yml"
 cp "$ROOT/templates/.workflow/bin/hekate-agent" "$PROJECT/.workflow/bin/hekate-agent"
 chmod +x "$PROJECT/.workflow/bin/hekate-agent"
 
@@ -43,14 +100,88 @@ assert_contains() { case "$1" in *"$2"*) ;; *) fail "expected [$2] in [$1]" ;; e
 # Disabled by default.
 if "$CLI" run --task nope >/dev/null 2>&1; then fail 'disabled orchestration accepted a run'; fi
 
-# Runtime selection is local and supports model/effort overrides.
+# A committed, single-quoted default profile resolves without guessing from prompt text.
+sed -e 's/^enabled: false$/enabled: true/' -e "s/^default_profile: medium$/default_profile: 'medium'/" .workflow/orchestration.yml > .workflow/orchestration.yml.tmp
+mv .workflow/orchestration.yml.tmp .workflow/orchestration.yml
+profiles=$($CLI profiles)
+assert_contains "$profiles" 'medium'
+assert_contains "$profiles" 'fake/sol'
+case "$profiles" in *'none'*) fail 'reserved profile was listed' ;; esac
+$CLI run --task 'implicit committed profile' --foreground >/dev/null
+implicit=$(find .workflow/runs -mindepth 1 -maxdepth 1 -type d | head -n 1)
+[ "$(cat "$implicit/profile")" = medium ] || fail 'committed default profile not persisted'
+[ "$(cat "$implicit/model")" = fake/sol ] || fail 'committed profile model not resolved'
+
+# Dotted profile and harness names match exactly; quoted values are unquoted.
+harnesses=$($CLI harnesses)
+dotted_harness_line=$(printf '%s\n' "$harnesses" | grep '^fake\.cli ')
+assert_contains "$dotted_harness_line" 'command=pi'
+assert_contains "$dotted_harness_line" 'model=fake/dotted-harness'
+$CLI run --profile a.b --task 'dotted exact profile' --foreground >/dev/null
+dotted=''
+for candidate in .workflow/runs/*; do [ "$(cat "$candidate/task.md")" = 'dotted exact profile' ] && dotted="$candidate"; done
+[ "$(cat "$dotted/model")" = fake/dotted ] || fail 'dotted profile aliased another name'
+$CLI run --profile quoted --task 'quoted profile values' --foreground >/dev/null
+quoted=''
+for candidate in .workflow/runs/*; do [ "$(cat "$candidate/task.md")" = 'quoted profile values' ] && quoted="$candidate"; done
+[ "$(cat "$quoted/harness")" = pi ] || fail 'single-quoted harness was not unquoted'
+[ "$(cat "$quoted/model")" = fake/quoted ] || fail 'single-quoted model was not unquoted'
+
+# Local profile selection and explicit effort override profile values.
+profile_config=$($CLI config use-profile small)
+assert_contains "$profile_config" 'default_profile: small'
+$CLI run --task 'local profile override' --effort xhigh --foreground >/dev/null
+local_profile=''
+for candidate in .workflow/runs/*; do [ "$(cat "$candidate/task.md")" = 'local profile override' ] && local_profile="$candidate"; done
+[ "$(cat "$local_profile/profile")" = small ] || fail 'local profile not persisted'
+[ "$(cat "$local_profile/model")" = fake/terra ] || fail 'local profile model not resolved'
+[ "$(cat "$local_profile/effort")" = xhigh ] || fail 'explicit effort did not override profile'
+assert_contains "$($CLI status "$(basename "$local_profile")")" 'profile: small'
+
+# A developer may define a local-only profile; config updates preserve it.
+cat >> .workflow/orchestration.local.yml <<'EOF'
+
+profiles:
+  personal:
+    harness: pi
+    model: fake/personal
+    effort: low
+EOF
+$CLI config use-profile personal >/dev/null
+$CLI run --task 'local-only profile' --foreground >/dev/null
+personal=''
+for candidate in .workflow/runs/*; do [ "$(cat "$candidate/task.md")" = 'local-only profile' ] && personal="$candidate"; done
+[ "$(cat "$personal/profile")" = personal ] || fail 'local-only profile not persisted'
+[ "$(cat "$personal/model")" = fake/personal ] || fail 'local-only profile not resolved'
+grep -q '^  personal:$' .workflow/orchestration.local.yml || fail 'local profile was not preserved'
+
+# Profile validation and conflict rules.
+if $CLI run --profile unknown --task nope >/dev/null 2>&1; then fail 'unknown profile accepted'; fi
+if $CLI run --profile none --task nope >/dev/null 2>&1; then fail 'reserved none profile accepted'; fi
+if $CLI config use-profile null >/dev/null 2>&1; then fail 'reserved null profile accepted'; fi
+bad_profile=$(printf 'small\n../../escape')
+if $CLI run --profile "$bad_profile" --task nope >/dev/null 2>&1; then fail 'multiline profile accepted'; fi
+if $CLI run --profile small --harness pi --task nope >/dev/null 2>&1; then fail 'profile+harness conflict accepted'; fi
+if $CLI run --profile no-effort --task nope >/dev/null 2>&1; then fail 'profile capability mismatch accepted'; fi
+
+# Explicit harness bypasses an implicit profile.
+$CLI run --harness claude --task 'explicit harness' --foreground >/dev/null
+explicit=''
+for candidate in .workflow/runs/*; do [ "$(cat "$candidate/task.md")" = 'explicit harness' ] && explicit="$candidate"; done
+[ "$(cat "$explicit/profile")" = none ] || fail 'explicit harness did not bypass implicit profile'
+[ "$(cat "$explicit/harness")" = claude ] || fail 'explicit harness not selected'
+
+# Runtime harness selection disables inherited project profile safely.
 config=$($CLI config use pi --model fake/model --effort low)
 assert_contains "$config" 'default_harness: pi'
+assert_contains "$config" 'default_profile: none'
 assert_contains "$config" 'model=fake/model effort=low'
 
 # Foreground invocation preserves one prompt argument and substitutes argv safely.
 $CLI run --task 'implement a long task; do not split me' --foreground
-run=$(find .workflow/runs -mindepth 1 -maxdepth 1 -type d | head -n 1)
+run=''
+for candidate in .workflow/runs/*; do [ "$(cat "$candidate/task.md")" = 'implement a long task; do not split me' ] && run="$candidate"; done
+[ -n "$run" ] || fail 'foreground job not found'
 out=$(cat "$run/stdout.log")
 assert_contains "$out" '<fake/model>'
 assert_contains "$out" '<low>'
@@ -84,6 +215,22 @@ for candidate in .workflow/runs/*; do
   [ "$(cat "$candidate/harness")" = aider ] && aider_run="$candidate"
 done
 assert_contains "$(cat "$aider_run/stdout.log")" 'file-prompt:task from file'
+
+# Doctor treats missing optional CLIs as scan results, with targeted/strict modes.
+doctor=$($CLI doctor)
+assert_contains "$doctor" 'ok       enabled  pi'
+assert_contains "$doctor" 'missing  enabled  opencode'
+if $CLI doctor opencode >/dev/null 2>&1; then fail 'targeted missing doctor returned success'; fi
+if $CLI doctor --strict >/dev/null 2>&1; then fail 'strict doctor returned success with missing harnesses'; fi
+$CLI doctor pi >/dev/null || fail 'targeted available doctor failed'
+awk '
+  /^  aider:[[:space:]]*$/ { in_aider=1; print; next }
+  in_aider && /^    enabled:/ { print "    enabled: false"; in_aider=0; next }
+  { print }
+' .workflow/orchestration.yml > .workflow/orchestration.yml.tmp
+mv .workflow/orchestration.yml.tmp .workflow/orchestration.yml
+assert_contains "$($CLI doctor)" 'disabled disabled aider'
+if $CLI doctor aider >/dev/null 2>&1; then fail 'targeted disabled doctor returned success'; fi
 
 # Reject shell metacharacters, multiline path traversal, and cwd escape.
 if $CLI config use pi --model 'x;touch-pwned' >/dev/null 2>&1; then fail 'unsafe model accepted'; fi

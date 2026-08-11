@@ -10,13 +10,15 @@ usage() {
 Usage: hekate-agent <command> [options]
 
 Commands:
-  doctor                         Check configured harness executables
+  doctor [<harness>|--strict]    Check configured harness executables
   harnesses                      List configured harnesses and defaults
+  profiles                       List named task-routing profiles
   models <harness>               Best-effort model discovery/help
   config show                    Show effective local selection
   config use <harness> [--model M] [--effort E]
+  config use-profile <profile>   Select a local default profile
   config clear                   Remove personal overrides
-  run [--harness H] [--model M] [--effort E] [--cwd DIR]
+  run [--profile P | --harness H] [--model M] [--effort E] [--cwd DIR]
       (--task TEXT | --task-file FILE) [--name NAME] [--foreground]
   list                           List jobs
   status <job-id>                Show job state and metadata
@@ -55,38 +57,50 @@ unquote() {
 top_value() {
   file="$1" key="$2"
   [ -f "$file" ] || return 0
-  awk -v key="$key" '$0 ~ "^" key ":[[:space:]]*" { v=$0; sub("^" key ":[[:space:]]*","",v); sub(/[[:space:]]+#.*/,"",v); gsub(/^[\" ]+|[\" ]+$/,"",v); print v; exit }' "$file"
+  raw="$(awk -v key="$key" '$0 ~ "^" key ":[[:space:]]*" { v=$0; sub("^" key ":[[:space:]]*","",v); sub(/[[:space:]]+#.*/,"",v); print v; exit }' "$file")"
+  [ -z "$raw" ] || unquote "$raw"
 }
 
 nested_value() {
   file="$1" section="$2" item="$3" key="$4"
   [ -f "$file" ] || return 0
-  awk -v section="$section" -v item="$item" -v key="$key" '
-    $0 ~ "^" section ":[[:space:]]*$" { s=1; next }
+  raw="$(awk -v section="$section" -v item="$item" -v key="$key" '
+    { trimmed=$0; sub(/[[:space:]]+$/, "", trimmed) }
+    trimmed == section ":" { s=1; next }
     s && $0 ~ "^[^[:space:]]" { exit }
-    s && $0 ~ "^  " item ":[[:space:]]*$" { i=1; next }
+    s && trimmed == "  " item ":" { i=1; next }
     i && $0 ~ "^  [^[:space:]][^:]*:[[:space:]]*$" { exit }
-    i && $0 ~ "^    " key ":[[:space:]]*" { v=$0; sub("^    " key ":[[:space:]]*","",v); sub(/[[:space:]]+#.*/,"",v); gsub(/^[\" ]+|[\" ]+$/,"",v); print v; exit }
-  ' "$file"
+    i && $0 ~ "^    " key ":[[:space:]]*" { v=$0; sub("^    " key ":[[:space:]]*","",v); sub(/[[:space:]]+#.*/,"",v); print v; exit }
+  ' "$file")"
+  [ -z "$raw" ] || unquote "$raw"
 }
 
 harness_list() {
   file="$1" item="$2" list_key="$3"
   awk -v item="$item" -v list_key="$list_key" '
-    /^harnesses:[[:space:]]*$/ { h=1; next }
+    { trimmed=$0; sub(/[[:space:]]+$/, "", trimmed) }
+    trimmed == "harnesses:" { h=1; next }
     h && /^[^[:space:]]/ { exit }
-    h && $0 ~ "^  " item ":[[:space:]]*$" { i=1; next }
+    h && trimmed == "  " item ":" { i=1; next }
     i && /^  [^[:space:]][^:]*:[[:space:]]*$/ { exit }
     i && $0 ~ "^    " list_key ":[[:space:]]*$" { a=1; next }
-    a && /^      -[[:space:]]*/ { v=$0; sub(/^      -[[:space:]]*/,"",v); gsub(/^[\"]|[\"]$/,"",v); print v; next }
+    a && /^      -[[:space:]]*/ { v=$0; sub(/^      -[[:space:]]*/,"",v); if ((substr(v,1,1)=="\"" && substr(v,length(v),1)=="\"") || (substr(v,1,1)=="\047" && substr(v,length(v),1)=="\047")) v=substr(v,2,length(v)-2); print v; next }
     a && $0 !~ /^      / { exit }
   ' "$file"
 }
 
 harness_args() { harness_list "$1" "$2" args; }
 
-harness_names() {
-  awk '/^harnesses:[[:space:]]*$/{h=1;next} h&&/^[^[:space:]]/{exit} h&&/^  [A-Za-z0-9_.-]+:[[:space:]]*$/{v=$0;sub(/^  /,"",v);sub(/:.*/,"",v);print v}' "$CONFIG"
+section_names() {
+  file="$1" section="$2"
+  [ -f "$file" ] || return 0
+  awk -v section="$section" '$0 ~ "^" section ":[[:space:]]*$"{s=1;next} s&&/^[^[:space:]]/{exit} s&&/^  [A-Za-z0-9_.-]+:[[:space:]]*$/{v=$0;sub(/^  /,"",v);sub(/:.*/,"",v);print v}' "$file"
+}
+
+harness_names() { section_names "$CONFIG" harnesses; }
+
+profile_names() {
+  { section_names "$CONFIG" profiles; section_names "$LOCAL_CONFIG" profiles; } | awk '$0 != "none" && $0 != "null" && !seen[$0]++'
 }
 
 valid_token() {
@@ -101,10 +115,31 @@ valid_id() {
 "*) return 1 ;; esac
   printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$'
 }
+valid_profile_id() {
+  valid_id "$1" || return 1
+  case "$1" in none|null) return 1 ;; *) return 0 ;; esac
+}
 require_harness() { valid_id "$1" || die "invalid harness name"; nested_value "$CONFIG" harnesses "$1" command | grep -q . || die "unknown harness: $1"; }
 
 local_or_base_top() {
   key="$1"; v="$(top_value "$LOCAL_CONFIG" "$key")"; [ -n "$v" ] || v="$(top_value "$CONFIG" "$key")"; printf '%s\n' "$v"
+}
+
+effective_default_profile() {
+  v="$(local_or_base_top default_profile)"
+  case "$v" in ''|null|none) printf '\n' ;; *) printf '%s\n' "$v" ;; esac
+}
+
+profile_value() {
+  profile="$1" key="$2"
+  v="$(nested_value "$LOCAL_CONFIG" profiles "$profile" "$key")"
+  [ -n "$v" ] || v="$(nested_value "$CONFIG" profiles "$profile" "$key")"
+  printf '%s\n' "$v"
+}
+
+require_profile() {
+  valid_profile_id "$1" || die "invalid or reserved profile name: $1"
+  profile_value "$1" harness | grep -q . || die "unknown profile: $1"
 }
 
 default_value() {
@@ -192,27 +227,34 @@ worker() {
 }
 
 write_local_config() {
-  selected="$1" selected_model="$2" selected_effort="$3"
-  tmp="$LOCAL_CONFIG.tmp.$$"
+  selected="$1" selected_model="$2" selected_effort="$3" selected_profile="$4"
+  tmp="$LOCAL_CONFIG.tmp.$$"; preserved="$LOCAL_CONFIG.profiles.$$"
+  if [ -f "$LOCAL_CONFIG" ]; then
+    awk '/^profiles:[[:space:]]*$/{p=1;print;next} p&&/^[^[:space:]]/{exit} p{print}' "$LOCAL_CONFIG" > "$preserved"
+  else : > "$preserved"; fi
   {
     printf '# Personal overrides; generated by hekate-agent.\n'
-    printf 'schema_version: 1\n'
+    printf 'schema_version: 2\n'
     printf 'enabled: true\n'
     printf 'default_harness: %s\n' "$selected"
+    printf 'default_profile: %s\n' "$selected_profile"
     printf 'defaults:\n'
     for h in $(harness_names); do
       m="$(default_value "$h" model)"; e="$(default_value "$h" effort)"
       if [ "$h" = "$selected" ]; then [ -z "$selected_model" ] || m="$selected_model"; [ -z "$selected_effort" ] || e="$selected_effort"; fi
       printf '  %s:\n    model: "%s"\n    effort: "%s"\n' "$h" "$m" "$e"
     done
+    if [ -s "$preserved" ]; then printf '\n'; cat "$preserved"; fi
   } > "$tmp"
-  mv "$tmp" "$LOCAL_CONFIG"
+  rm -f "$preserved"; mv "$tmp" "$LOCAL_CONFIG"
 }
 
 show_config() {
   printf 'project: %s\n' "$ROOT"
   printf 'enabled: %s\n' "$(local_or_base_top enabled)"
   printf 'default_harness: %s\n' "$(local_or_base_top default_harness)"
+  profile="$(effective_default_profile)"; [ -n "$profile" ] || profile=none
+  printf 'default_profile: %s\n' "$profile"
   printf 'local_override: %s\n' "$LOCAL_CONFIG"
   for h in $(harness_names); do printf '%-10s model=%s effort=%s\n' "$h" "$(default_value "$h" model)" "$(default_value "$h" effort)"; done
 }
@@ -240,19 +282,21 @@ effective_state() {
 
 status_job() {
   run="$(job_path "$1")"; state="$(effective_state "$run")"
-  printf 'id: %s\nstatus: %s\nharness: %s\nmodel: %s\neffort: %s\ncwd: %s\n' "$1" "$state" "$(read_field "$run" harness)" "$(read_field "$run" model)" "$(read_field "$run" effort)" "$(read_field "$run" cwd)"
+  printf 'id: %s\nstatus: %s\nprofile: %s\nharness: %s\nmodel: %s\neffort: %s\ncwd: %s\n' "$1" "$state" "$(read_field "$run" profile)" "$(read_field "$run" harness)" "$(read_field "$run" model)" "$(read_field "$run" effort)" "$(read_field "$run" cwd)"
   [ ! -f "$run/exit-code" ] || printf 'exit_code: %s\n' "$(cat "$run/exit-code")"
   [ ! -f "$run/started-at" ] || printf 'started_at: %s\n' "$(cat "$run/started-at")"
   [ ! -f "$run/finished-at" ] || printf 'finished_at: %s\n' "$(cat "$run/finished-at")"
 }
 
 run_command() {
-  HARNESS="$(local_or_base_top default_harness)"; MODEL=""; EFFORT=""; CWD="$ROOT"; TASK=""; SOURCE_FILE=""; NAME=""; FOREGROUND=0
+  PROFILE=""; PROFILE_EXPLICIT=0; HARNESS=""; HARNESS_EXPLICIT=0; MODEL=""; MODEL_SELECTED=0; EFFORT=""; EFFORT_SELECTED=0
+  CWD="$ROOT"; TASK=""; SOURCE_FILE=""; NAME=""; FOREGROUND=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --harness) [ "$#" -ge 2 ] || die "--harness needs a value"; HARNESS="$2"; shift 2 ;;
-      --model) [ "$#" -ge 2 ] || die "--model needs a value"; MODEL="$2"; shift 2 ;;
-      --effort) [ "$#" -ge 2 ] || die "--effort needs a value"; EFFORT="$2"; shift 2 ;;
+      --profile) [ "$#" -ge 2 ] || die "--profile needs a value"; PROFILE="$2"; PROFILE_EXPLICIT=1; shift 2 ;;
+      --harness) [ "$#" -ge 2 ] || die "--harness needs a value"; HARNESS="$2"; HARNESS_EXPLICIT=1; shift 2 ;;
+      --model) [ "$#" -ge 2 ] || die "--model needs a value"; MODEL="$2"; MODEL_SELECTED=1; shift 2 ;;
+      --effort) [ "$#" -ge 2 ] || die "--effort needs a value"; EFFORT="$2"; EFFORT_SELECTED=1; shift 2 ;;
       --cwd) [ "$#" -ge 2 ] || die "--cwd needs a value"; CWD="$2"; shift 2 ;;
       --task) [ "$#" -ge 2 ] || die "--task needs a value"; TASK="$2"; shift 2 ;;
       --task-file) [ "$#" -ge 2 ] || die "--task-file needs a value"; SOURCE_FILE="$2"; shift 2 ;;
@@ -261,20 +305,33 @@ run_command() {
       *) die "unknown run option: $1" ;;
     esac
   done
+  [ "$PROFILE_EXPLICIT" -eq 0 ] || [ "$HARNESS_EXPLICIT" -eq 0 ] || die "use either --profile or --harness"
   [ "$(local_or_base_top enabled)" = true ] || die "orchestration is disabled; run: hekate-agent config use <harness>"
+
+  if [ "$PROFILE_EXPLICIT" -eq 0 ] && [ "$HARNESS_EXPLICIT" -eq 0 ]; then PROFILE="$(effective_default_profile)"; fi
+  if [ -n "$PROFILE" ]; then
+    require_profile "$PROFILE"
+    HARNESS="$(profile_value "$PROFILE" harness)"
+    if [ "$MODEL_SELECTED" -eq 0 ]; then MODEL="$(profile_value "$PROFILE" model)"; [ -z "$MODEL" ] || MODEL_SELECTED=1; fi
+    if [ "$EFFORT_SELECTED" -eq 0 ]; then EFFORT="$(profile_value "$PROFILE" effort)"; [ -z "$EFFORT" ] || EFFORT_SELECTED=1; fi
+  else
+    PROFILE=none
+    [ -n "$HARNESS" ] || HARNESS="$(local_or_base_top default_harness)"
+  fi
+
   require_harness "$HARNESS"
   [ "$(nested_value "$CONFIG" harnesses "$HARNESS" enabled)" = true ] || die "harness is disabled: $HARNESS"
   [ -n "$MODEL" ] || MODEL="$(default_value "$HARNESS" model)"; [ -n "$EFFORT" ] || EFFORT="$(default_value "$HARNESS" effort)"
   valid_token "$MODEL" || die "model contains unsupported characters"; valid_token "$EFFORT" || die "effort contains unsupported characters"
-  if [ "$(nested_value "$CONFIG" harnesses "$HARNESS" supports_model)" != true ] && [ "$MODEL" != default ]; then die "$HARNESS does not support model selection"; fi
-  if [ "$(nested_value "$CONFIG" harnesses "$HARNESS" supports_effort)" != true ] && [ "$EFFORT" != default ]; then die "$HARNESS does not support effort selection"; fi
+  if [ "$MODEL_SELECTED" -eq 1 ] && [ "$(nested_value "$CONFIG" harnesses "$HARNESS" supports_model)" != true ]; then die "$HARNESS does not support model selection"; fi
+  if [ "$EFFORT_SELECTED" -eq 1 ] && [ "$(nested_value "$CONFIG" harnesses "$HARNESS" supports_effort)" != true ]; then die "$HARNESS does not support effort selection"; fi
   CWD="$(canonical_cwd "$CWD")"; ensure_allowed_cwd "$CWD"
   if [ -n "$SOURCE_FILE" ] && [ -n "$TASK" ]; then die "use either --task or --task-file"; fi
   if [ -n "$SOURCE_FILE" ]; then [ -f "$SOURCE_FILE" ] || die "task file not found"; else [ -n "$TASK" ] || die "--task or --task-file is required"; fi
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"; suffix="$$"; id="$stamp-$HARNESS-$suffix"
   [ -z "$NAME" ] || { valid_id "$NAME" || die "invalid job name"; id="$stamp-$NAME-$suffix"; }
   run="$(jobs_dir)/$id"; mkdir -p "$run"
-  printf '%s\n' "$HARNESS" > "$run/harness"; printf '%s\n' "$MODEL" > "$run/model"; printf '%s\n' "$EFFORT" > "$run/effort"; printf '%s\n' "$CWD" > "$run/cwd"; atomic_write "$run/status" queued
+  printf '%s\n' "$PROFILE" > "$run/profile"; printf '%s\n' "$HARNESS" > "$run/harness"; printf '%s\n' "$MODEL" > "$run/model"; printf '%s\n' "$EFFORT" > "$run/effort"; printf '%s\n' "$CWD" > "$run/cwd"; atomic_write "$run/status" queued
   if [ -n "$SOURCE_FILE" ]; then cp "$SOURCE_FILE" "$run/task.md"; else printf '%s\n' "$TASK" > "$run/task.md"; fi
   if [ "$FOREGROUND" -eq 1 ]; then
     set +e; worker "$run"; code=$?; set -e
@@ -292,11 +349,23 @@ case "$cmd" in
   help|-h|--help) usage ;;
   __worker) [ "$#" -eq 1 ] || exit 2; worker "$1" ;;
   doctor)
+    strict=0; target=""
+    [ "$#" -le 1 ] || die "doctor accepts one harness or --strict"
+    if [ "$#" -eq 1 ]; then case "$1" in --strict) strict=1 ;; *) target="$1"; require_harness "$target" ;; esac; fi
     rc=0
-    for h in $(harness_names); do c="$(nested_value "$CONFIG" harnesses "$h" command)"; if command -v "$c" >/dev/null 2>&1; then printf 'ok      %-10s %s\n' "$h" "$(command -v "$c")"; else printf 'missing %-10s %s\n' "$h" "$c"; rc=1; fi; done
+    for h in $(harness_names); do
+      [ -z "$target" ] || [ "$h" = "$target" ] || continue
+      c="$(nested_value "$CONFIG" harnesses "$h" command)"; enabled="$(nested_value "$CONFIG" harnesses "$h" enabled)"
+      if [ "$enabled" != true ]; then printf 'disabled disabled %-10s %s\n' "$h" "$c"; [ -z "$target" ] || rc=1
+      elif command -v "$c" >/dev/null 2>&1; then printf 'ok       enabled  %-10s %s\n' "$h" "$(command -v "$c")"
+      else printf 'missing  enabled  %-10s %s\n' "$h" "$c"; [ "$strict" -eq 0 ] && [ -z "$target" ] || rc=1
+      fi
+    done
     exit "$rc" ;;
   harnesses)
     for h in $(harness_names); do printf '%-10s command=%s model=%s effort=%s\n' "$h" "$(nested_value "$CONFIG" harnesses "$h" command)" "$(default_value "$h" model)" "$(default_value "$h" effort)"; done ;;
+  profiles)
+    for p in $(profile_names); do printf '%-14s harness=%s model=%s effort=%s\n' "$p" "$(profile_value "$p" harness)" "$(profile_value "$p" model)" "$(profile_value "$p" effort)"; done ;;
   models)
     [ "$#" -eq 1 ] || die "models requires a harness"; require_harness "$1"
     models_command="$(nested_value "$CONFIG" harnesses "$1" models_command)"
@@ -316,7 +385,15 @@ case "$cmd" in
         [ -z "$m" ] || valid_token "$m" || die "invalid model"; [ -z "$e" ] || valid_token "$e" || die "invalid effort"
         [ -z "$m" ] || [ "$(nested_value "$CONFIG" harnesses "$h" supports_model)" = true ] || die "$h does not support model selection"
         [ -z "$e" ] || [ "$(nested_value "$CONFIG" harnesses "$h" supports_effort)" = true ] || die "$h does not support effort selection"
-        write_local_config "$h" "$m" "$e"; show_config ;;
+        write_local_config "$h" "$m" "$e" none; show_config ;;
+      use-profile)
+        [ "$#" -eq 1 ] || die "config use-profile requires one profile"
+        p="$1"; require_profile "$p"; h="$(profile_value "$p" harness)"; require_harness "$h"
+        [ "$(nested_value "$CONFIG" harnesses "$h" enabled)" = true ] || die "harness is disabled: $h"
+        m="$(profile_value "$p" model)"; e="$(profile_value "$p" effort)"
+        [ -z "$m" ] || [ "$(nested_value "$CONFIG" harnesses "$h" supports_model)" = true ] || die "$h does not support model selection"
+        [ -z "$e" ] || [ "$(nested_value "$CONFIG" harnesses "$h" supports_effort)" = true ] || die "$h does not support effort selection"
+        write_local_config "$h" "" "" "$p"; show_config ;;
       *) die "unknown config command: $sub" ;;
     esac ;;
   run) run_command "$@" ;;
