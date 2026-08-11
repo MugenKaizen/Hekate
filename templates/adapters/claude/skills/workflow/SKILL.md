@@ -36,12 +36,23 @@ a `.workflow/` directory.
     events in `events.jsonl`. Large tasks also keep a checkpoint checklist in
     the same markdown file. The format is in section 4 of `AGENTS.md`.
 
-4. **Cross-harness delegation.** When `status.yml → orchestration.enabled` is
-   true, use `.workflow/bin/hekate-agent` for long-running external harness
-   jobs. Keep one writer per checkout, use worktrees for concurrent writers,
-   and independently verify child output. Do not use MCP.
+4. **Native subagents.** Before proposing a native-subagent wave, read
+   `.workflow/session.local.yml` and apply `subagents.mode`: `off` forbids
+   launches, `ask` requires one user approval for the exact proposed wave, and
+   `auto` permits primary-controlled launches at its discretion. Missing or
+   invalid mode means `ask`. The primary retains architecture, decomposition,
+   orchestration, and acceptance; children cannot recursively delegate.
 
-5. **Scope control.** Don't do unrequested refactors, don't add
+5. **Cross-harness delegation.** When `status.yml → orchestration.enabled` is
+   true, the current user-facing session is the primary harness and exclusively
+   owns architecture, decomposition, routing/profile choice, orchestration,
+   review, and final verification. Use `.workflow/bin/hekate-agent` for bounded
+   external executor/advisor jobs. Children must not re-delegate or launch
+   subagents. Classify/select profiles in the primary session; the runner never
+   infers from prompt text. Keep one writer per checkout, use worktrees for
+   concurrent writers, and independently verify child output. Do not use MCP.
+
+6. **Scope control.** Don't do unrequested refactors, don't add
    dependencies without discussion, and perform destructive actions only
    with explicit confirmation.
 
@@ -51,4 +62,5 @@ a `.workflow/` directory.
 - Fast pre-flight — `.workflow/status.yml`.
 - Lazy configs — `.workflow/{stack,architecture,conventions,workflow,presets}.yml`.
 - History — `.workflow/history/` (in `.gitignore`).
+- Native-subagent policy — `.workflow/session.local.yml` (gitignored).
 - Harness routing — `.workflow/orchestration.yml` + `.workflow/bin/hekate-agent`.

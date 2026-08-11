@@ -165,7 +165,7 @@ try {
     if ($DryRun) { Write-AawLog 'DRY RUN - no files will be written' }
 
     Copy-AawInstallItem (Join-AawPath $tpl 'AGENTS.md') (Join-AawPath $Target 'AGENTS.md')
-    foreach ($rel in @('.workflow/stack.yml','.workflow/architecture.yml','.workflow/conventions.yml','.workflow/workflow.yml','.workflow/presets.yml','.workflow/status.yml','.workflow/orchestration.yml','.workflow/bootstrap.md','.workflow/README.md','.workflow/bin/hekate-agent','.workflow/bin/hekate-agent.ps1','.workflow/history/.gitkeep')) {
+    foreach ($rel in @('.workflow/stack.yml','.workflow/architecture.yml','.workflow/conventions.yml','.workflow/workflow.yml','.workflow/presets.yml','.workflow/status.yml','.workflow/orchestration.yml','.workflow/session.local.yml','.workflow/bootstrap.md','.workflow/README.md','.workflow/bin/hekate-agent','.workflow/bin/hekate-agent.ps1','.workflow/history/.gitkeep')) {
         Copy-AawInstallItem (Join-AawPath $tpl $rel) (Join-AawPath $Target $rel)
     }
     if (Test-AawAgent 'claude') {

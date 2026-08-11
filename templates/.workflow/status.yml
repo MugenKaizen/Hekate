@@ -23,8 +23,13 @@ features:
 orchestration:
   enabled: false
   default_harness: pi
+  default_profile: null
   config: .workflow/orchestration.yml
   runner: .workflow/bin/hekate-agent
+
+native_subagents:
+  policy: .workflow/session.local.yml
+  missing_or_invalid_mode: ask
 
 lazy_load:
   stack: .workflow/stack.yml

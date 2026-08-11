@@ -24,11 +24,22 @@ if ($inputText) { Write-Output ('stdin:' + $inputText.TrimEnd()) }
     $quotedExe = $psExe.Replace('"','')
     $quotedFake = $fake.Replace('"','')
     $config = @"
-schema_version: 1
+schema_version: 2
 enabled: false
 default_harness: fake
+default_profile: medium
 jobs_dir: .workflow/runs
 allow_external_cwd: false
+
+profiles:
+  medium:
+    harness: fake
+    model: profile/model
+    effort: medium
+  none:
+    harness: fake
+    model: reserved/model
+    effort: medium
 
 harnesses:
   fake:
@@ -52,13 +63,66 @@ harnesses:
       - "{model}"
       - --effort
       - "{effort}"
+  missing:
+    enabled: true
+    command: definitely-missing-hekate-command
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: true
+    default_model: default/model
+    default_effort: medium
+    args:
+  disabled:
+    enabled: false
+    command: disabled-hekate-command
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: true
+    default_model: default/model
+    default_effort: medium
+    args:
 "@
     Set-Content -LiteralPath (Join-Path $Project '.workflow\orchestration.yml') -Value $config -Encoding UTF8
     $cli = Join-Path $Project '.workflow\bin\hekate-agent.ps1'
 
+    & $cli config use-profile medium | Out-Null
+    $profileRun = (& $cli run --foreground --effort xhigh --task 'profile task' | Out-String)
+    Assert-Contains $profileRun 'profile/model'
+    Assert-Contains $profileRun 'xhigh'
+    $profiles = (& $cli profiles | Out-String)
+    Assert-Contains $profiles 'medium'
+    if ($profiles.Contains('none')) { throw 'Reserved profile was listed' }
+
+    Add-Content -LiteralPath (Join-Path $Project '.workflow\orchestration.local.yml') -Value @'
+
+profiles:
+  personal:
+    harness: fake
+    model: personal/model
+    effort: high
+'@
+    $profiles = (& $cli profiles | Out-String)
+    Assert-Contains $profiles 'medium'
+    Assert-Contains $profiles 'personal'
+    & $cli config use-profile personal | Out-Null
+    $personalRun = (& $cli run --foreground --task 'personal profile task' | Out-String)
+    Assert-Contains $personalRun 'personal/model'
+
+    & $psExe -NoProfile -ExecutionPolicy Bypass -File $cli config use-profile none 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { throw 'Reserved profile was accepted' }
+
+    $doctor = (& $cli doctor | Out-String)
+    Assert-Contains $doctor 'missing'
+    Assert-Contains $doctor 'disabled'
+    & $psExe -NoProfile -ExecutionPolicy Bypass -File $cli doctor missing 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { throw 'Targeted missing doctor returned success' }
+    & $psExe -NoProfile -ExecutionPolicy Bypass -File $cli doctor disabled 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { throw 'Targeted disabled doctor returned success' }
+
     & $cli config use fake --model test/model --effort high | Out-Null
     $show = (& $cli config show | Out-String)
     Assert-Contains $show 'default_harness: fake'
+    Assert-Contains $show 'default_profile: none'
     Assert-Contains $show 'test/model'
 
     $foreground = (& $cli run --foreground --task 'task with spaces' | Out-String)

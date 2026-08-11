@@ -50,6 +50,34 @@ current task needs the information:
   user explicitly asks to initialize the workflow.
 - `.workflow/orchestration.yml` — only when `status.yml → orchestration.enabled`
   is true and the task needs cross-harness delegation or model routing.
+- `.workflow/session.local.yml` — only before considering a native-subagent
+  delegation wave or when the user asks to change its policy.
+
+### 1.2 Native-subagent session policy
+
+The primary harness may use its native subagents for bounded advisory, research,
+review, validation, or execution work, while retaining all architecture,
+decomposition, orchestration, and acceptance authority.
+
+Before the first native-subagent wave, read
+`.workflow/status.yml → native_subagents.policy` (normally
+`.workflow/session.local.yml`). Resolve `subagents.mode` as follows:
+
+- `off` — do not launch native subagents; the primary handles the task itself.
+- `ask` — before each exact delegation wave, show the user the proposed agent
+  count, roles, scope, and write authority, then wait for approval. One approval
+  covers only that named wave; additions or later waves require another approval.
+- `auto` — the primary may launch native subagents at its discretion without a
+  separate question for each wave.
+
+Missing, unreadable, or invalid policy means `ask`. Only an explicit user choice
+may change the mode to `off` or `auto`; the primary writes that choice to the
+local policy file and the user may change it at any time. `auto` never grants
+permission to push, merge, release, perform destructive actions, bypass the
+one-writer rule, or transfer primary-harness ownership. Native-subagent policy
+is separate from external CLI harness availability in `orchestration.yml`.
+Every child remains a bounded executor/advisor and must not recursively
+orchestrate or delegate.
 
 ---
 
@@ -156,11 +184,16 @@ Wait for plan approval before executing.
 
 ### 3.6. Optional cross-harness delegation
 
-When `.workflow/status.yml → orchestration.enabled` is `true`, any current
-parent harness may delegate a substantial task to any configured child harness
-through the project-local job controller:
+When `.workflow/status.yml → orchestration.enabled` is `true`, the **primary
+harness** — the current user-facing agent session — may delegate a bounded task
+to a configured child harness through the project-local job controller. The
+primary harness exclusively owns architecture, task decomposition, profile and
+model routing, subagent/harness orchestration, review, and final verification:
 
 ```sh
+.workflow/bin/hekate-agent run --profile <profile> \
+  --task-file <self-contained-task.md>
+# Or bypass the implicit profile explicitly:
 .workflow/bin/hekate-agent run --harness pi --model <model> --effort high \
   --task-file <self-contained-task.md>
 ```
@@ -168,20 +201,42 @@ through the project-local job controller:
 On Windows use:
 
 ```powershell
-.\.workflow\bin\hekate-agent.ps1 run --harness pi --model <model> `
-  --effort high --task-file <self-contained-task.md>
+.\.workflow\bin\hekate-agent.ps1 run --profile <profile> `
+  --task-file <self-contained-task.md>
 ```
 
 Runs are background by default and return a job id. Use `status`, `logs`,
-`wait`, `result`, and `stop` with that id. `config use` changes the local
-per-developer default without modifying the committed project config. Read
+`wait`, `result`, and `stop` with that id. `config use-profile` selects a local
+profile; `config use` selects a local harness and deliberately bypasses an
+inherited project profile. Neither modifies committed project config. Read
 `.workflow/orchestration.yml` for the declarative registry only when routing a
 task.
 
+When named profiles exist, classify before launch; never ask the runner to infer
+from prompt text:
+
+- `small` — narrow, low-risk, usually one concern or mechanical change;
+- `medium` — normal non-trivial coding with bounded multi-file reasoning;
+- `complex` — high-risk or multi-system execution under architecture already
+  decided by the primary harness;
+- `small-deep` (optional) — narrow scope that still needs unusually deep
+  reasoning.
+
+Use the configured matching profile, or an explicit profile chosen by the user.
+CLI `--model` / `--effort` may override profile values for one run.
+
 Delegation rules:
 
+- Delegation transfers execution or advisory work, never ownership. A child is
+  a bounded executor/advisor: it must not redesign architecture, decompose the
+  parent task, choose its own route/profile, launch subagents or harnesses, or
+  recursively delegate. If its slice requires such a decision, it stops and
+  returns the decision to the primary harness.
+- The primary harness creates the task contract, chooses the child/profile, and
+  invokes `run` directly. A lifecycle helper may only monitor an existing job
+  ID; it cannot start jobs or take over routing or orchestration.
 - The task file must be self-contained: scope, allowed writes, expected output,
-  and verification commands.
+  child role, prohibited re-delegation, and verification commands.
 - Never run two writer agents in the same checkout. Concurrent writers require
   separate git worktrees; advisory/review agents should be explicitly read-only.
 - A child result is evidence, not acceptance. The parent remains responsible for
@@ -278,5 +333,6 @@ Allowed `type` values: `started | analyzed | options_proposed | planned | checkp
 - `.workflow/status.yml` — fast pre-flight index; read before any work
 - `.workflow/bootstrap.md` — initialization procedure; read only when pre-flight fails
 - `.workflow/orchestration.yml` — optional cross-harness registry and project defaults
+- `.workflow/session.local.yml` — gitignored native-subagent permission policy
 - `.workflow/bin/hekate-agent` — persistent background job controller (no MCP/daemon)
 - `.workflow/README.md` — brief cheat sheet
