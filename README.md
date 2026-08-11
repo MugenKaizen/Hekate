@@ -106,8 +106,17 @@ On Windows PowerShell 5.1+:
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.ps1)))
 ```
 
-For reproducible installation, replace `main` with a published tag such as
-`v0.1.0-beta.1`.
+For a reproducible installation, pin both the downloaded script and its source
+snapshot to the same published tag:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/v0.1.0-beta.1/install.sh \
+  | sh -s -- --ref=v0.1.0-beta.1
+```
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/v0.1.0-beta.1/install.ps1))) -Ref v0.1.0-beta.1
+```
 
 Or with flags:
 
