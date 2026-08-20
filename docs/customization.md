@@ -76,6 +76,17 @@ You can put your own adapter into a fork of this repo under
 `templates/adapters/<agent>/` and extend `install.sh` with a `has_agent`
 section.
 
+### 3a. Agent Skills
+
+Portable skills live in `templates/skills/<name>/SKILL.md`. Keep their
+frontmatter limited to fields from the Agent Skills standard. The installers
+deploy the same source to `.claude/skills/` for Claude Code and to
+`.agents/skills/` for Cursor and Codex.
+
+Do not put portable skills under `templates/adapters/`. Harness-specific
+commands, subagents, hooks, and settings remain in their adapter because their
+paths and schemas are not portable.
+
 ### 3b. Native-subagent session policy
 
 `.workflow/session.local.yml` is gitignored and controls whether the primary

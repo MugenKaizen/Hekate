@@ -80,6 +80,16 @@ function Test-AawAgent {
     return ((',' + $Agents + ',') -like "*,$Name,*")
 }
 
+function Copy-AawSkills {
+    param([string]$SourceRoot, [string]$DestinationRoot)
+    foreach ($dir in (Get-ChildItem -LiteralPath $SourceRoot -Directory)) {
+        $skill = Join-AawPath $dir.FullName 'SKILL.md'
+        if (Test-Path -LiteralPath $skill) {
+            Copy-AawInstallItem $skill (Join-AawPath $DestinationRoot ($dir.Name + '/SKILL.md'))
+        }
+    }
+}
+
 function Append-AawInstallGitignore {
     param([string]$Snippet)
     $gi = Join-AawPath $Target '.gitignore'
@@ -176,10 +186,13 @@ try {
         foreach ($file in (Get-ChildItem -LiteralPath (Join-AawPath $tpl 'adapters/claude/agents') -Filter '*.md')) {
             Copy-AawInstallItem $file.FullName (Join-AawPath $Target ('.claude/agents/' + $file.Name))
         }
-        Copy-AawInstallItem (Join-AawPath $tpl 'adapters/claude/skills/workflow/SKILL.md') (Join-AawPath $Target '.claude/skills/workflow/SKILL.md')
+        Copy-AawSkills (Join-AawPath $tpl 'skills') (Join-AawPath $Target '.claude/skills')
     }
     if (Test-AawAgent 'cursor') {
         Copy-AawInstallItem (Join-AawPath $tpl 'adapters/cursor/.cursor/rules/workflow.mdc') (Join-AawPath $Target '.cursor/rules/workflow.mdc')
+    }
+    if ((Test-AawAgent 'cursor') -or (Test-AawAgent 'codex')) {
+        Copy-AawSkills (Join-AawPath $tpl 'skills') (Join-AawPath $Target '.agents/skills')
     }
 
     Append-AawInstallGitignore (Join-AawPath $tpl 'gitignore.snippet')

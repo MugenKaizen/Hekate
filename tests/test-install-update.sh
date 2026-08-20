@@ -12,11 +12,25 @@ mkdir -p "$PROJECT"
 [ -f "$PROJECT/.workflow/bin/hekate-agent.ps1" ]
 [ -f "$PROJECT/.workflow/session.local.yml" ]
 [ -f "$PROJECT/.claude/commands/harness.md" ]
+[ -f "$PROJECT/.claude/skills/workflow/SKILL.md" ]
+[ -f "$PROJECT/.claude/skills/unslop/SKILL.md" ]
 grep -qxF '  mode: ask' "$PROJECT/.workflow/session.local.yml"
 grep -qxF '.workflow/session.local.yml' "$PROJECT/.gitignore"
 grep -qxF '    - 003-add-cross-harness-orchestration' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 004-add-routing-profiles' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 005-add-session-subagent-policy' "$PROJECT/.workflow/state.yml"
+grep -qxF '    - 006-relocate-agent-skills' "$PROJECT/.workflow/state.yml"
+
+# Agent Skills use the portable .agents path for non-Claude adapters.
+PORTABLE_PROJECT="$TMP/portable-project"
+mkdir -p "$PORTABLE_PROJECT"
+"$ROOT/install.sh" --source="$ROOT" --target="$PORTABLE_PROJECT" --agents=cursor,codex >/dev/null
+[ -f "$PORTABLE_PROJECT/.agents/skills/workflow/SKILL.md" ]
+[ -f "$PORTABLE_PROJECT/.agents/skills/unslop/SKILL.md" ]
+[ ! -e "$PORTABLE_PROJECT/.claude/skills/workflow/SKILL.md" ]
+rm -f "$PORTABLE_PROJECT/.agents/skills/unslop/SKILL.md"
+sh "$ROOT/update-runner.sh" --target="$PORTABLE_PROJECT" --ref=HEAD >/dev/null
+[ -f "$PORTABLE_PROJECT/.agents/skills/unslop/SKILL.md" ]
 
 # Installer re-entry must not mark skipped migrations as applied.
 if "$ROOT/install.sh" --source="$ROOT" --target="$PROJECT" --agents=claude >/dev/null 2>&1; then
@@ -24,7 +38,7 @@ if "$ROOT/install.sh" --source="$ROOT" --target="$PROJECT" --agents=claude >/dev
   exit 1
 fi
 
-# Simulate an installation that has migrations 001/002 but not 003/004/005.
+# Simulate an installation that has migrations 001/002 but not 003/004/005/006.
 awk '
   /^(orchestration|native_subagents):$/ { drop=1; next }
   drop && /^  / { next }
@@ -33,9 +47,9 @@ awk '
   { print }
 ' "$PROJECT/.workflow/status.yml" > "$PROJECT/.workflow/status.yml.tmp"
 mv "$PROJECT/.workflow/status.yml.tmp" "$PROJECT/.workflow/status.yml"
-awk '$0 != "    - 003-add-cross-harness-orchestration" && $0 != "    - 004-add-routing-profiles" && $0 != "    - 005-add-session-subagent-policy" { print }' "$PROJECT/.workflow/state.yml" > "$PROJECT/.workflow/state.yml.tmp"
+awk '$0 != "    - 003-add-cross-harness-orchestration" && $0 != "    - 004-add-routing-profiles" && $0 != "    - 005-add-session-subagent-policy" && $0 != "    - 006-relocate-agent-skills" { print }' "$PROJECT/.workflow/state.yml" > "$PROJECT/.workflow/state.yml.tmp"
 mv "$PROJECT/.workflow/state.yml.tmp" "$PROJECT/.workflow/state.yml"
-rm -f "$PROJECT/.workflow/orchestration.yml" "$PROJECT/.workflow/session.local.yml" "$PROJECT/.workflow/bin/hekate-agent" "$PROJECT/.workflow/bin/hekate-agent.ps1" "$PROJECT/.claude/commands/harness.md" "$PROJECT/.claude/agents/harness-orchestrator.md"
+rm -f "$PROJECT/.workflow/orchestration.yml" "$PROJECT/.workflow/session.local.yml" "$PROJECT/.workflow/bin/hekate-agent" "$PROJECT/.workflow/bin/hekate-agent.ps1" "$PROJECT/.claude/commands/harness.md" "$PROJECT/.claude/agents/harness-orchestrator.md" "$PROJECT/.claude/skills/unslop/SKILL.md"
 
 sh "$ROOT/update-runner.sh" --target="$PROJECT" --ref=HEAD >/dev/null
 [ -x "$PROJECT/.workflow/bin/hekate-agent" ]
@@ -44,7 +58,9 @@ grep -qxF '  orchestration: .workflow/orchestration.yml' "$PROJECT/.workflow/sta
 grep -qxF '    - 003-add-cross-harness-orchestration' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 004-add-routing-profiles' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 005-add-session-subagent-policy' "$PROJECT/.workflow/state.yml"
+grep -qxF '    - 006-relocate-agent-skills' "$PROJECT/.workflow/state.yml"
 [ -f "$PROJECT/.workflow/session.local.yml" ]
+[ -f "$PROJECT/.claude/skills/unslop/SKILL.md" ]
 grep -qxF '  mode: ask' "$PROJECT/.workflow/session.local.yml"
 grep -qxF 'native_subagents:' "$PROJECT/.workflow/status.yml"
 grep -qxF '  policy: .workflow/session.local.yml' "$PROJECT/.workflow/status.yml"
@@ -138,5 +154,26 @@ TARGET="$SESSION_PROJECT" RUNNER_ROOT="$ROOT" TMP_ROOT="$TMP/session-work" \
   BACKUP_ROOT="$SESSION_PROJECT/.workflow/backups" BACKED_UP_LIST_FILE="$TMP/session-work/backed.txt" \
   DRY_RUN=0 sh "$ROOT/migrations/005-add-session-subagent-policy.sh" >/dev/null
 grep -qxF '  mode: auto' "$SESSION_PROJECT/.workflow/session.local.yml"
+
+# Migration 006 moves legacy Hekate skills for portable adapters, including
+# user edits, while dry-run remains read-only.
+SKILLS_PROJECT="$TMP/skills-project"
+mkdir -p "$SKILLS_PROJECT/.workflow/backups" "$SKILLS_PROJECT/.claude/skills/workflow" "$TMP/skills-work"
+cp "$ROOT/templates/skills/workflow/SKILL.md" "$SKILLS_PROJECT/.claude/skills/workflow/SKILL.md"
+printf 'install:\n  adapters:\n    - cursor\nschema:\n  applied_migrations: []\n' > "$SKILLS_PROJECT/.workflow/state.yml"
+: > "$TMP/skills-work/backed.txt"
+TARGET="$SKILLS_PROJECT" STATE_FILE="$SKILLS_PROJECT/.workflow/state.yml" RUNNER_ROOT="$ROOT" TMP_ROOT="$TMP/skills-work" \
+  BACKUP_ROOT="$SKILLS_PROJECT/.workflow/backups" BACKED_UP_LIST_FILE="$TMP/skills-work/backed.txt" \
+  DRY_RUN=1 sh "$ROOT/migrations/006-relocate-agent-skills.sh" >/dev/null
+[ ! -e "$SKILLS_PROJECT/.agents/skills/workflow/SKILL.md" ]
+[ -f "$SKILLS_PROJECT/.claude/skills/workflow/SKILL.md" ]
+printf '\nUser customization.\n' >> "$SKILLS_PROJECT/.claude/skills/workflow/SKILL.md"
+: > "$TMP/skills-work/backed.txt"
+TARGET="$SKILLS_PROJECT" STATE_FILE="$SKILLS_PROJECT/.workflow/state.yml" RUNNER_ROOT="$ROOT" TMP_ROOT="$TMP/skills-work" \
+  BACKUP_ROOT="$SKILLS_PROJECT/.workflow/backups" BACKED_UP_LIST_FILE="$TMP/skills-work/backed.txt" \
+  DRY_RUN=0 sh "$ROOT/migrations/006-relocate-agent-skills.sh" >/dev/null
+grep -qxF 'User customization.' "$SKILLS_PROJECT/.agents/skills/workflow/SKILL.md"
+[ ! -e "$SKILLS_PROJECT/.claude/skills/workflow/SKILL.md" ]
+[ -f "$SKILLS_PROJECT/.workflow/backups/.claude/skills/workflow/SKILL.md.bak" ]
 
 printf 'ok: install/update smoke tests passed\n'

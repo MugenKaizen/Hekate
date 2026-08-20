@@ -1,7 +1,8 @@
 # Codex / GitHub Copilot
 
-These agents read `AGENTS.md` from the project root directly — no extra
-files are required. `install.sh` ensures that `AGENTS.md` is in place.
+These agents read `AGENTS.md` from the project root directly. Codex also
+loads shared Agent Skills from `.agents/skills/`; the installer deploys
+both files when the Codex adapter is selected.
 
 If you want to highlight the workflow explicitly in
 `.github/copilot-instructions.md`, create the file with this content:

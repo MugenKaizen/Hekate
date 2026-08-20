@@ -70,12 +70,16 @@ $script:OLD_TPL = ''
 . (Join-Path $script:RUNNER_ROOT 'lib/update-common.ps1')
 
 function Update-AawTemplateFile {
-    param([string]$TargetRelativePath, [string]$TemplateRelativePath)
+    param(
+        [string]$TargetRelativePath,
+        [string]$TemplateRelativePath,
+        [string]$OldTemplateRelativePath = $TemplateRelativePath
+    )
     $newSrc = Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') $TemplateRelativePath
     $oldSrc = ''
     $targetPath = Join-AawPath $script:TARGET $TargetRelativePath
 
-    if ($script:OLD_TPL) { $oldSrc = Join-AawPath $script:OLD_TPL $TemplateRelativePath }
+    if ($script:OLD_TPL) { $oldSrc = Join-AawPath $script:OLD_TPL $OldTemplateRelativePath }
     if (-not (Test-Path -LiteralPath $newSrc)) { return }
 
     if (-not (Test-Path -LiteralPath $targetPath)) {
@@ -101,6 +105,15 @@ function Update-AawTemplateFile {
     }
 
     Write-AawReviewFile $TargetRelativePath $newSrc
+}
+
+function Update-AawSkills {
+    param([string]$DestinationRoot)
+    foreach ($skillDir in (Get-ChildItem -LiteralPath (Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') 'skills') -Directory)) {
+        if (Test-Path -LiteralPath (Join-AawPath $skillDir.FullName 'SKILL.md')) {
+            Update-AawTemplateFile ($DestinationRoot + '/' + $skillDir.Name + '/SKILL.md') ('skills/' + $skillDir.Name + '/SKILL.md') ('adapters/claude/skills/' + $skillDir.Name + '/SKILL.md')
+        }
+    }
 }
 
 function Confirm-AawForceUpdate {
@@ -256,10 +269,13 @@ try {
         foreach ($agentFile in (Get-ChildItem -LiteralPath (Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') 'adapters/claude/agents') -Filter '*.md')) {
             Update-AawTemplateFile ('.claude/agents/' + $agentFile.Name) ('adapters/claude/agents/' + $agentFile.Name)
         }
-        Update-AawTemplateFile '.claude/skills/workflow/SKILL.md' 'adapters/claude/skills/workflow/SKILL.md'
+        Update-AawSkills '.claude/skills'
     }
     if (Test-AawProjectHasCursorAdapter) {
         Update-AawTemplateFile '.cursor/rules/workflow.mdc' 'adapters/cursor/.cursor/rules/workflow.mdc'
+    }
+    if ((Test-AawProjectHasCursorAdapter) -or (Test-AawProjectHasCodexAdapter)) {
+        Update-AawSkills '.agents/skills'
     }
 
     Write-AawStateFile

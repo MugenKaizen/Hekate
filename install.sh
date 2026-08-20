@@ -152,6 +152,15 @@ has_agent() {
   esac
 }
 
+copy_skills_to() {
+  skills_target="$1"
+  for skill_dir in "$TPL/skills/"*/; do
+    [ -e "$skill_dir/SKILL.md" ] || continue
+    skill_name="$(basename "$skill_dir")"
+    do_copy "$skill_dir/SKILL.md" "$skills_target/$skill_name/SKILL.md"
+  done
+}
+
 # --- acquire source ------------------------------------------------------
 CLEANUP_DIR=""
 cleanup() {
@@ -223,8 +232,7 @@ if has_agent claude; then
     [ -e "$f" ] || continue
     do_copy "$f" "$TARGET/.claude/agents/$(basename "$f")"
   done
-  do_copy "$TPL/adapters/claude/skills/workflow/SKILL.md" \
-          "$TARGET/.claude/skills/workflow/SKILL.md"
+  copy_skills_to "$TARGET/.claude/skills"
 fi
 
 if has_agent cursor; then
@@ -233,9 +241,12 @@ if has_agent cursor; then
 fi
 
 if has_agent codex; then
-  # Codex reads AGENTS.md directly — nothing needs to be copied.
-  # The adapter README is kept only as reference (not copied into the project).
+  # Codex reads AGENTS.md directly; shared skills are copied below.
   :
+fi
+
+if has_agent cursor || has_agent codex; then
+  copy_skills_to "$TARGET/.agents/skills"
 fi
 
 # --- gitignore -----------------------------------------------------------

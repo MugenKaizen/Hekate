@@ -59,12 +59,13 @@ trap cleanup EXIT INT TERM
 update_template_file() {
   target_rel="$1"
   template_rel="$2"
+  old_template_rel="${3:-$template_rel}"
   new_src="$RUNNER_ROOT/templates/$template_rel"
   old_src=""
   target_path="$TARGET/$target_rel"
 
   if [ -n "$OLD_TPL" ]; then
-    old_src="$OLD_TPL/$template_rel"
+    old_src="$OLD_TPL/$old_template_rel"
   fi
 
   [ -f "$new_src" ] || return 0
@@ -94,6 +95,15 @@ update_template_file() {
   fi
 
   write_review_file "$target_rel" "$new_src"
+}
+
+update_skills_to() {
+  skills_target="$1"
+  for skill_file in "$RUNNER_ROOT"/templates/skills/*/SKILL.md; do
+    [ -e "$skill_file" ] || continue
+    skill_name="$(basename "$(dirname "$skill_file")")"
+    update_template_file "$skills_target/$skill_name/SKILL.md" "skills/$skill_name/SKILL.md" "adapters/claude/skills/$skill_name/SKILL.md"
+  done
 }
 
 confirm_force_update() {
@@ -313,11 +323,15 @@ if project_has_claude_adapter; then
     update_template_file ".claude/agents/$(basename "$agent_file")" "adapters/claude/agents/$(basename "$agent_file")"
   done
 
-  update_template_file ".claude/skills/workflow/SKILL.md" "adapters/claude/skills/workflow/SKILL.md"
+  update_skills_to ".claude/skills"
 fi
 
 if project_has_cursor_adapter; then
   update_template_file ".cursor/rules/workflow.mdc" "adapters/cursor/.cursor/rules/workflow.mdc"
+fi
+
+if project_has_cursor_adapter || project_has_codex_adapter; then
+  update_skills_to ".agents/skills"
 fi
 
 write_state_file

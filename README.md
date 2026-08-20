@@ -158,7 +158,8 @@ CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 .cursor/rules/workflow.mdc         # Cursor adapter
 .claude/commands/                  # /init-workflow, /analyze, /plan, /harness
 .claude/agents/                    # optional harness job lifecycle monitor
-.claude/skills/workflow/SKILL.md
+.claude/skills/                    # Agent Skills for Claude Code
+.agents/skills/                    # shared Agent Skills for Cursor and Codex
 .workflow/stack.yml                # fill in at initialization
 .workflow/architecture.yml
 .workflow/conventions.yml
@@ -240,6 +241,9 @@ Update behavior:
   the versioned `update-runner.ps1` from the downloaded snapshot.
 - The runner applies pending scripts from `migrations/` in order, based on
   `.workflow/state.yml -> schema.applied_migrations`.
+- Upgrades relocate legacy portable skills from `.claude/skills/` to
+  `.agents/skills/` for Cursor/Codex projects. Claude projects retain their
+  `.claude/skills/` copy, and relocated files are backed up before removal.
 - `.workflow/*.yml` is updated conservatively: only known workflow keys are
   changed by explicit migrations. Existing values win, and unknown/custom
   keys are preserved.
@@ -341,8 +345,9 @@ RELEASING.md             # release checklist
 templates/              # what gets deployed into the project
   AGENTS.md
   .workflow/            # YAML configs + status index
+  skills/               # portable Agent Skills
   adapters/
-    claude/             # CLAUDE.md, commands/, agents/, skills/
+    claude/             # CLAUDE.md, commands/, agents/
     cursor/             # .cursor/rules/
     codex/              # reference (Codex reads AGENTS.md directly)
   gitignore.snippet
@@ -369,8 +374,8 @@ flowchart LR
         CX[adapters/codex/]
     end
 
-    subgraph CC["Claude extras"]
-        SK[.claude/skills/workflow/SKILL.md]
+    subgraph CC["Harness extras"]
+        SK["Agent Skills<br/>.claude/skills · .agents/skills"]
         CMD[".claude/commands/<br/>init-workflow · analyze · plan"]
     end
 
