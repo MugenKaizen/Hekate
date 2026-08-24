@@ -8,7 +8,12 @@ stable, releases remain in the `0.x` series and may be marked as prereleases.
 1. Choose the version and create `docs/releases/v<version>.md`.
 2. Move relevant entries from `CHANGELOG.md → Unreleased` into the versioned
    section and set the date.
-3. Verify that install/update examples in the release notes use the exact tag.
+3. Verify that install/update examples in the repository use the
+   `<full-40-character-commit-sha>` placeholder in both the raw bootstrap URL
+   and `--commit` / `-Commit`. The final SHA cannot be embedded in its own Git
+   commit; it is substituted into the published GitHub Release notes after the
+   release tag is created. Do not use a branch, tag, or short SHA in executable
+   download examples.
 4. Run locally:
 
    ```sh
@@ -26,23 +31,31 @@ stable, releases remain in the `0.x` series and may be marked as prereleases.
    ```sh
    git switch main
    git pull --ff-only
-   git tag -a v0.1.0-beta.1 -m "Hekate v0.1.0-beta.1"
-   git push origin v0.1.0-beta.1
+   VERSION=v<version>
+   git tag -a "$VERSION" -m "Hekate $VERSION"
+   git push origin "$VERSION"
    ```
 
 8. Create the GitHub Release manually using
-   `docs/releases/v0.1.0-beta.1.md` as its description and mark beta tags as
+   `docs/releases/$VERSION.md` as its description and mark beta tags as
    prereleases. With GitHub CLI installed:
 
    ```sh
-   gh release create v0.1.0-beta.1 \
-     --verify-tag \
-     --prerelease \
-     --title "Hekate v0.1.0-beta.1 — Cross-harness orchestration" \
-     --notes-file docs/releases/v0.1.0-beta.1.md
+   RELEASE_COMMIT=$(git rev-parse "${VERSION}^{commit}")
+   test "$(printf '%s' "$RELEASE_COMMIT" | wc -c | tr -d ' ')" -eq 40
+   RELEASE_NOTES=$(mktemp)
+   sed "s/<full-40-character-commit-sha>/$RELEASE_COMMIT/g" \
+     "docs/releases/$VERSION.md" > "$RELEASE_NOTES"
+   gh release create "$VERSION" \
+      --verify-tag \
+      --prerelease \
+      --title "Hekate $VERSION" \
+      --notes-file "$RELEASE_NOTES"
+   rm -f "$RELEASE_NOTES"
    ```
 
-9. Verify the tag-pinned install and update commands from the published release.
+9. Verify the commit-pinned install and update commands from the published
+   release. Confirm that omitting `--commit` / `-Commit` fails before download.
 
 ## Recovery
 

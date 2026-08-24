@@ -97,41 +97,35 @@ Release notes for `v0.1.0-beta.1` live in
 
 ## Installation
 
-In the root of the target project:
+Choose a trusted full 40-character commit SHA from a published release. Use the
+same SHA for both the bootstrap script and the source snapshot:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.sh | sh
+HEKATE_COMMIT='<full-40-character-commit-sha>'
+curl -fsSL "https://raw.githubusercontent.com/MugenKaizen/Hekate/$HEKATE_COMMIT/install.sh" \
+  | sh -s -- --commit="$HEKATE_COMMIT"
 ```
 
 On Windows PowerShell 5.1+:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.ps1)))
-```
-
-For a reproducible installation, pin both the downloaded script and its source
-snapshot to the same published tag:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/v0.1.0-beta.1/install.sh \
-  | sh -s -- --ref=v0.1.0-beta.1
-```
-
-```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/v0.1.0-beta.1/install.ps1))) -Ref v0.1.0-beta.1
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$HekateCommit = '<full-40-character-commit-sha>'
+$Script = Invoke-RestMethod "https://raw.githubusercontent.com/MugenKaizen/Hekate/$HekateCommit/install.ps1"
+& ([scriptblock]::Create($Script)) -Commit $HekateCommit
 ```
 
 Or with flags:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.sh \
-  | sh -s -- --target=. --agents=claude,cursor,codex
+curl -fsSL "https://raw.githubusercontent.com/MugenKaizen/Hekate/$HEKATE_COMMIT/install.sh" \
+  | sh -s -- --commit="$HEKATE_COMMIT" --target=. --agents=claude,cursor,codex
 ```
 
 Windows PowerShell 5.1+:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.ps1))) -Target . -Agents claude,cursor,codex
+& ([scriptblock]::Create($Script)) -Commit $HekateCommit -Target . -Agents claude,cursor,codex
 ```
 
 Supported flags:
@@ -142,13 +136,18 @@ Supported flags:
 | `--agents=<list>` | Which adapters to lay down: `claude`, `cursor`, `codex`. Defaults to all. |
 | `--force` | Overwrite existing files. |
 | `--dry-run` | Show what would be done without making changes. |
-| `--ref=<git-ref>` | Branch/tag to download. Defaults to `main`. |
+| `--commit=<sha>` | Full 40-character commit SHA. Required for network downloads. |
+| `--ref=<git-ref>` | Revision metadata for local `--source` development only. |
 | `--source=<path>` | Local copy of the repository (for debugging). |
 
 PowerShell accepts the same options as named parameters: `-Target`, `-Agents`,
-`-Force`, `-DryRun`, `-Ref`, `-Source`, and `-Repo`. If Hekate is already
+`-Force`, `-DryRun`, `-Commit`, `-Ref`, `-Source`, and `-Repo`. If Hekate is already
 installed, the installer refuses to rewrite migration state; use the update
 command instead (or explicit `--force` / `-Force` to replace managed files).
+
+The commit SHA makes the downloaded content immutable; it does not prove who
+authored the commit. Obtain the expected SHA through a trusted channel. Branches,
+tags, and short SHAs are deliberately rejected for network downloads.
 
 What will appear in the project:
 
@@ -181,62 +180,42 @@ CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
 
 ## Updating an existing installation
 
-In the root of the target project:
+Choose the trusted full commit SHA to update to. The bootstrap URL and
+`--commit` / `-Commit` value must match:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh | sh
+HEKATE_COMMIT='<full-40-character-commit-sha>'
+curl -fsSL "https://raw.githubusercontent.com/MugenKaizen/Hekate/$HEKATE_COMMIT/update.sh" \
+  | sh -s -- --target=. --commit="$HEKATE_COMMIT"
 ```
 
 On Windows PowerShell 5.1+:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1)))
-```
-
-Or with flags:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
-  | sh -s -- --target=. --ref=main
-```
-
-Windows PowerShell 5.1+:
-
-```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target . -Ref main
-```
-
-Pin to a specific commit:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
-  | sh -s -- --target=. --commit=<git-sha>
-```
-
-Windows PowerShell 5.1+:
-
-```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target . -Commit <git-sha>
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$HekateCommit = '<full-40-character-commit-sha>'
+$Script = Invoke-RestMethod "https://raw.githubusercontent.com/MugenKaizen/Hekate/$HekateCommit/update.ps1"
+& ([scriptblock]::Create($Script)) -Target . -Commit $HekateCommit
 ```
 
 Overwrite locally edited managed files after confirmation:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
-  | sh -s -- --target=. --force
+curl -fsSL "https://raw.githubusercontent.com/MugenKaizen/Hekate/$HEKATE_COMMIT/update.sh" \
+  | sh -s -- --target=. --commit="$HEKATE_COMMIT" --force
 ```
 
 Windows PowerShell 5.1+:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target . -Force
+& ([scriptblock]::Create($Script)) -Target . -Commit $HekateCommit -Force
 ```
 
 Update behavior:
 
-- `update.sh` is a stable bootstrap: it downloads the requested repository
-  snapshot (branch/tag via `--ref` or exact commit via `--commit`) and runs
-  the versioned `update-runner.sh` from that snapshot.
+- `update.sh` downloads only the full commit requested via `--commit` and runs
+  the versioned `update-runner.sh` from that immutable snapshot. `--ref` is
+  accepted only with local `--source` development.
 - `update.ps1` provides the same flow for Windows PowerShell 5.1+ and runs
   the versioned `update-runner.ps1` from the downloaded snapshot.
 - The runner applies pending scripts from `migrations/` in order, based on

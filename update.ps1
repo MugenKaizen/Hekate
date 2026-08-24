@@ -3,7 +3,7 @@ param(
     [string]$Target = (Get-Location).Path,
     [string]$Source = '',
     [string]$Repo = $(if ($env:AAW_REPO) { $env:AAW_REPO } else { 'MugenKaizen/Hekate' }),
-    [string]$Ref = 'main',
+    [string]$Ref = '',
     [string]$Commit = '',
     [switch]$Force,
     [switch]$DryRun,
@@ -22,15 +22,16 @@ function Show-AawHelp {
 ai_agent_workflow update bootstrap
 
 Usage:
-  powershell -ExecutionPolicy Bypass -File update.ps1 -Target . -Ref main
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target .
+  powershell -ExecutionPolicy Bypass -File update.ps1 -Source . -Target .
+  $commit = '<full-40-character-sha>'
+  & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/MugenKaizen/Hekate/$commit/update.ps1"))) -Commit $commit -Target .
 
 Flags:
   -Target <path>      Root of the target project. Defaults to the current directory.
   -Source <path>     Local copy of the repository (for updater development).
   -Repo <owner/name> GitHub repository. Defaults to the built-in one.
-  -Ref <git-ref>     Branch/tag to update to. Defaults to main.
-  -Commit <sha>      Exact commit to update to.
+  -Ref <git-ref>     Source revision metadata for local -Source development.
+  -Commit <sha>      Full 40-character commit SHA. Required for downloads.
   -Force             Overwrite locally edited managed files after confirmation.
   -DryRun            Show what would be done without making changes.
 '@ | Write-Host
@@ -50,12 +51,15 @@ foreach ($arg in $Rest) {
 
 if ($Help) { Show-AawHelp; exit 0 }
 
+if ($Ref -and $Commit) { Throw-Aaw 'use either -Ref or -Commit' }
+if ($Commit -and $Commit -notmatch '^[0-9a-fA-F]{40}$') { Throw-Aaw '-Commit must be a full 40-character hexadecimal SHA' }
+if (-not $Source -and -not $Commit) { Throw-Aaw 'remote update requires -Commit <full-40-character-sha>' }
+
 $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('aaw-update-' + [guid]::NewGuid().ToString('N'))
 
 try {
     New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
-    $requestedRev = $Ref
-    if ($Commit) { $requestedRev = $Commit }
+    $requestedRev = if ($Commit) { $Commit } elseif ($Ref) { $Ref } else { 'HEAD' }
 
     if ($Source) {
         $snapshotRoot = (Resolve-Path -LiteralPath $Source).Path
@@ -78,7 +82,7 @@ try {
     $runner = Join-Path $snapshotRoot 'update-runner.ps1'
     if (-not (Test-Path -LiteralPath $runner)) { Throw-Aaw 'update runner missing in downloaded snapshot' }
 
-    $runnerArgs = @('-Target', $Target, '-Repo', $Repo, '-Ref', $Ref)
+    $runnerArgs = @('-Target', $Target, '-Repo', $Repo, '-Ref', $requestedRev)
     if ($Commit) { $runnerArgs += @('-Commit', $Commit) }
     if ($DryRun) { $runnerArgs += '-DryRun' }
     if ($Force) { $runnerArgs += '-Force' }

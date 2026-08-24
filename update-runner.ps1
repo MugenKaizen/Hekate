@@ -2,7 +2,7 @@
 param(
     [string]$Target = (Get-Location).Path,
     [string]$Repo = $(if ($env:AAW_REPO) { $env:AAW_REPO } else { 'MugenKaizen/Hekate' }),
-    [string]$Ref = 'main',
+    [string]$Ref = 'HEAD',
     [string]$Commit = '',
     [switch]$Force,
     [switch]$DryRun,
@@ -31,7 +31,7 @@ ai_agent_workflow update runner
 Flags:
   -Target <path>      Root of the target project. Defaults to the current directory.
   -Repo <owner/name> GitHub repository. Defaults to the built-in one.
-  -Ref <git-ref>     Branch/tag to update to. Defaults to main.
+  -Ref <git-ref>     Source revision metadata. Defaults to HEAD.
   -Commit <sha>      Exact commit to update to.
   -Force             Overwrite locally edited managed files after confirmation.
   -DryRun            Show what would be done without making changes.

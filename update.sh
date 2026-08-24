@@ -2,17 +2,16 @@
 # ai_agent_workflow update bootstrap
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh | sh
-#   curl -fsSL .../update.sh | sh -s -- --target=/path/to/proj --ref=main
-#   curl -fsSL .../update.sh | sh -s -- --target=/path/to/proj --commit=<sha>
-#   curl -fsSL .../update.sh | sh -s -- --force
+#   curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/<full-sha>/update.sh \
+#     | sh -s -- --target=/path/to/proj --commit=<full-sha>
+#   sh update.sh --source=. --target=/path/to/proj
 #
 # Flags:
 #   --target=<path>     Root of the target project. Defaults to the current directory.
 #   --source=<path>     Local copy of the repository (for updater development).
 #   --repo=<owner/name> GitHub repository. Defaults to the built-in one.
-#   --ref=<git-ref>     Branch/tag to update to. Defaults to main.
-#   --commit=<sha>      Exact commit to update to.
+#   --ref=<git-ref>     Source revision metadata for local --source development.
+#   --commit=<sha>      Full 40-character commit SHA. Required for downloads.
 #   --force             Overwrite locally edited managed files after confirmation.
 #   --dry-run           Show what would be done without making changes.
 
@@ -21,7 +20,7 @@ set -eu
 TARGET="$(pwd)"
 SOURCE=""
 REPO="${AAW_REPO:-MugenKaizen/Hekate}"
-REF="main"
+REF=""
 COMMIT=""
 DRY_RUN=0
 FORCE=0
@@ -49,6 +48,14 @@ done
 log()  { printf '[aaw] %s\n' "$*"; }
 die()  { printf '[aaw] ERROR: %s\n' "$*" >&2; exit 1; }
 
+[ -z "$REF" ] || [ -z "$COMMIT" ] || die "use either --ref or --commit"
+if [ -n "$COMMIT" ]; then
+  printf '%s' "$COMMIT" | grep -Eq '^[0-9a-fA-F]{40}$' || die "--commit must be a full 40-character hexadecimal SHA"
+fi
+if [ -z "$SOURCE" ]; then
+  [ -n "$COMMIT" ] || die "remote update requires --commit=<full-40-character-sha>"
+fi
+
 TMP_ROOT="$(mktemp -d)"
 cleanup() {
   if [ -d "$TMP_ROOT" ]; then
@@ -57,10 +64,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-REQUESTED_REV="$REF"
-if [ -n "$COMMIT" ]; then
-  REQUESTED_REV="$COMMIT"
-fi
+REQUESTED_REV="${COMMIT:-${REF:-HEAD}}"
 
 if [ -n "$SOURCE" ]; then
   SNAPSHOT_ROOT="$SOURCE"
@@ -89,7 +93,7 @@ fi
 RUNNER="$SNAPSHOT_ROOT/update-runner.sh"
 [ -f "$RUNNER" ] || die "update runner missing in downloaded snapshot"
 
-set -- "--target=$TARGET" "--repo=$REPO" "--ref=$REF"
+set -- "--target=$TARGET" "--repo=$REPO" "--ref=$REQUESTED_REV"
 if [ -n "$COMMIT" ]; then
   set -- "$@" "--commit=$COMMIT"
 fi

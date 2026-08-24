@@ -3,7 +3,8 @@ param(
     [string]$Target = (Get-Location).Path,
     [string]$Agents = 'claude,cursor,codex',
     [string]$Source = '',
-    [string]$Ref = 'main',
+    [string]$Ref = '',
+    [string]$Commit = '',
     [string]$Repo = $(if ($env:AAW_REPO) { $env:AAW_REPO } else { 'MugenKaizen/Hekate' }),
     [switch]$Force,
     [switch]$DryRun,
@@ -25,8 +26,9 @@ function Show-AawHelp {
 ai_agent_workflow installer
 
 Usage:
-  powershell -ExecutionPolicy Bypass -File install.ps1 -Target . -Agents claude,cursor,codex
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.ps1))) -Target .
+  powershell -ExecutionPolicy Bypass -File install.ps1 -Source . -Target . -Agents claude,cursor,codex
+  $commit = '<full-40-character-sha>'
+  & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/MugenKaizen/Hekate/$commit/install.ps1"))) -Commit $commit -Target .
 
 Flags:
   -Target <path>      Root of the target project. Defaults to the current directory.
@@ -34,7 +36,8 @@ Flags:
   -Force             Overwrite existing files.
   -DryRun            Show what would be done without making changes.
   -Source <path>     Local copy of the repository (for installer development).
-  -Ref <git-ref>     Branch/tag to download. Defaults to main.
+  -Commit <sha>      Full 40-character commit SHA. Required for downloads.
+  -Ref <git-ref>     Source revision metadata for local -Source development.
   -Repo <owner/name> GitHub repository. Defaults to the built-in one.
 '@ | Write-Host
 }
@@ -44,6 +47,7 @@ foreach ($arg in $Rest) {
     if ($arg -like '--agents=*') { $Agents = $arg.Substring(9); continue }
     if ($arg -like '--source=*') { $Source = $arg.Substring(9); continue }
     if ($arg -like '--ref=*') { $Ref = $arg.Substring(6); continue }
+    if ($arg -like '--commit=*') { $Commit = $arg.Substring(9); continue }
     if ($arg -like '--repo=*') { $Repo = $arg.Substring(7); continue }
     if ($arg -eq '--force') { $Force = $true; continue }
     if ($arg -eq '--dry-run') { $DryRun = $true; continue }
@@ -55,6 +59,10 @@ if ($Help) { Show-AawHelp; exit 0 }
 
 $script:DRY_RUN = [bool]$DryRun
 $cleanupDir = ''
+$script:INSTALLED_REV = ''
+
+if ($Ref -and $Commit) { Throw-Aaw 'use either -Ref or -Commit' }
+if ($Commit -and $Commit -notmatch '^[0-9a-fA-F]{40}$') { Throw-Aaw '-Commit must be a full 40-character hexadecimal SHA' }
 
 function Copy-AawInstallItem {
     param([string]$Src, [string]$Dst)
@@ -125,7 +133,7 @@ function Write-AawInstallState {
     $lines.Add('install:')
     $lines.Add('  tool: hekate')
     $lines.Add("  installed_repo: $Repo")
-    $lines.Add("  installed_ref: $Ref")
+    $lines.Add("  installed_ref: $script:INSTALLED_REV")
     $lines.Add('  installed_at: ' + (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
     $lines.Add('  adapters:')
     foreach ($agent in ($Agents -split ',')) { if ($agent.Trim()) { $lines.Add('    - ' + $agent.Trim()) } }
@@ -146,14 +154,17 @@ function Write-AawInstallState {
 
 try {
     if ($Source) {
+        $script:INSTALLED_REV = if ($Commit) { $Commit } elseif ($Ref) { $Ref } else { 'HEAD' }
         $srcRoot = (Resolve-Path -LiteralPath $Source).Path
         if (-not (Test-Path -LiteralPath (Join-Path $srcRoot 'templates'))) { Throw-Aaw "-Source does not look like ai_agent_workflow: $srcRoot" }
         Write-AawLog "using local source: $srcRoot"
     } else {
+        if (-not $Commit) { Throw-Aaw 'remote installation requires -Commit <full-40-character-sha>' }
+        $script:INSTALLED_REV = $Commit
         $cleanupDir = Join-Path ([System.IO.Path]::GetTempPath()) ('aaw-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force -Path $cleanupDir | Out-Null
         $zip = Join-Path $cleanupDir 'src.zip'
-        $url = "https://codeload.github.com/$Repo/zip/$Ref"
+        $url = "https://codeload.github.com/$Repo/zip/$Commit"
         Write-AawLog "downloading $url"
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
@@ -209,8 +220,8 @@ try {
    3. The agent will analyze the project, fill out .workflow/*.yml,
       and write .workflow/status.yml.
 
- To update an existing installation later on Windows:
-   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target C:\path\to\project
+  To update later, choose a trusted full commit SHA and use the commit-pinned
+  command from the Hekate README. Branches, tags, and short SHAs are rejected.
 
  Until the required fields are filled in, the agent will NOT work - this is by design.
 ---------------------------------------------------------

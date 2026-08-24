@@ -4,7 +4,7 @@
 # Flags:
 #   --target=<path>     Root of the target project. Defaults to the current directory.
 #   --repo=<owner/name> GitHub repository. Defaults to the built-in one.
-#   --ref=<git-ref>     Branch/tag to update to. Defaults to main.
+#   --ref=<git-ref>     Source revision metadata. Defaults to HEAD.
 #   --commit=<sha>      Exact commit to update to.
 #   --force             Overwrite locally edited managed files after confirmation.
 #   --dry-run           Show what would be done without making changes.
@@ -13,7 +13,7 @@ set -eu
 
 TARGET="$(pwd)"
 REPO="${AAW_REPO:-MugenKaizen/Hekate}"
-REF="main"
+REF="HEAD"
 COMMIT=""
 DRY_RUN=0
 FORCE=0

@@ -2,9 +2,10 @@
 # ai_agent_workflow installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/install.sh | sh
-#   curl -fsSL .../install.sh | sh -s -- --target=/path/to/proj --agents=claude,cursor,codex
-#   bash install.sh --target=. --agents=claude --dry-run
+#   curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/<full-sha>/install.sh \
+#     | sh -s -- --commit=<full-sha>
+#   sh install.sh --source=. --target=/path/to/proj --agents=claude,cursor,codex
+#   sh install.sh --source=. --target=. --agents=claude --dry-run
 #
 # Flags:
 #   --target=<path>     Root of the target project. Defaults to the current directory.
@@ -13,7 +14,8 @@
 #   --force             Overwrite existing files.
 #   --dry-run           Show what would be done without making changes.
 #   --source=<path>     Local copy of the repository (for installer development).
-#   --ref=<git-ref>     Branch/tag to download. Defaults to main.
+#   --commit=<sha>      Full 40-character commit SHA. Required for downloads.
+#   --ref=<git-ref>     Source revision metadata for local --source development.
 #   --repo=<owner/name> GitHub repository. Defaults to the built-in one.
 
 set -eu
@@ -24,7 +26,8 @@ AGENTS="claude,cursor,codex"
 FORCE=0
 DRY_RUN=0
 SOURCE=""
-REF="main"
+REF=""
+COMMIT=""
 REPO="${AAW_REPO:-MugenKaizen/Hekate}"
 
 # --- args ----------------------------------------------------------------
@@ -34,6 +37,7 @@ for arg in "$@"; do
     --agents=*)  AGENTS="${arg#--agents=}" ;;
     --source=*)  SOURCE="${arg#--source=}" ;;
     --ref=*)     REF="${arg#--ref=}" ;;
+    --commit=*)  COMMIT="${arg#--commit=}" ;;
     --repo=*)    REPO="${arg#--repo=}" ;;
     --force)     FORCE=1 ;;
     --dry-run)   DRY_RUN=1 ;;
@@ -67,7 +71,7 @@ write_state_file() {
     printf 'install:\n'
     printf '  tool: hekate\n'
     printf '  installed_repo: %s\n' "$REPO"
-    printf '  installed_ref: %s\n' "$REF"
+    printf '  installed_ref: %s\n' "$INSTALLED_REV"
     printf '  installed_at: %s\n' "$timestamp"
     printf '  adapters:\n'
 
@@ -170,14 +174,22 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+[ -z "$REF" ] || [ -z "$COMMIT" ] || die "use either --ref or --commit"
+if [ -n "$COMMIT" ]; then
+  printf '%s' "$COMMIT" | grep -Eq '^[0-9a-fA-F]{40}$' || die "--commit must be a full 40-character hexadecimal SHA"
+fi
+
 if [ -n "$SOURCE" ]; then
+  INSTALLED_REV="${COMMIT:-${REF:-HEAD}}"
   SRC_ROOT="$SOURCE"
   [ -d "$SRC_ROOT/templates" ] || die "--source does not look like ai_agent_workflow: $SRC_ROOT"
   log "using local source: $SRC_ROOT"
 else
+  [ -n "$COMMIT" ] || die "remote installation requires --commit=<full-40-character-sha>"
+  INSTALLED_REV="$COMMIT"
   TMP="$(mktemp -d)"
   CLEANUP_DIR="$TMP"
-  TARBALL_URL="https://codeload.github.com/${REPO}/tar.gz/${REF}"
+  TARBALL_URL="https://codeload.github.com/${REPO}/tar.gz/${COMMIT}"
   log "downloading $TARBALL_URL"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$TARBALL_URL" -o "$TMP/src.tgz" || die "download failed"
@@ -265,12 +277,11 @@ cat <<EOF
     3. The agent will analyze the project, fill out .workflow/*.yml,
        and write .workflow/status.yml.
 
-  To update an existing installation later:
-    curl -fsSL https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.sh \
-      | sh -s -- --target=/path/to/project
+  To update later, choose a trusted full commit SHA and use the commit-pinned
+  command from the Hekate README. Branches, tags, and short SHAs are rejected.
 
   On Windows PowerShell 5.1+:
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/MugenKaizen/Hekate/main/update.ps1))) -Target C:\path\to\project
+    Use the matching commit-pinned update.ps1 command from the Hekate README.
 
  Until the required fields are filled in, the agent will NOT work — this is by design.
 ─────────────────────────────────────────────────────────

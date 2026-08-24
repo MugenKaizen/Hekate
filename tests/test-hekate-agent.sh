@@ -10,6 +10,12 @@ mkdir -p "$PROJECT/.workflow/bin" "$FAKEBIN"
 cp "$ROOT/templates/.workflow/orchestration.yml" "$PROJECT/.workflow/orchestration.yml"
 awk '
   /^default_profile:/ { print "default_profile: medium"; next }
+  /^  opencode:[[:space:]]*$/ { in_opencode=1; print; next }
+  in_opencode && /^    command:/ {
+    print "    command: hekate-test-missing-opencode"
+    in_opencode=0
+    next
+  }
   /^  claude:[[:space:]]*$/ {
     print "  fakeXcli:"
     print "    enabled: true"

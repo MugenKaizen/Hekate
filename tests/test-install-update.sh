@@ -5,9 +5,35 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 PROJECT="$TMP/project"
 mkdir -p "$PROJECT"
+FULL_COMMIT=0123456789abcdef0123456789abcdef01234567
+FAKEBIN="$TMP/fake-bin"
+CAPTURE_FILE="$TMP/download-url"
+mkdir -p "$FAKEBIN"
+cat > "$FAKEBIN/curl" <<'EOF'
+#!/usr/bin/env sh
+for arg in "$@"; do
+  case "$arg" in https://*) printf '%s\n' "$arg" > "$CAPTURE_FILE" ;; esac
+done
+exit 1
+EOF
+chmod +x "$FAKEBIN/curl"
+
+# Network bootstraps require an immutable full commit SHA before any download.
+if "$ROOT/install.sh" --target="$PROJECT" >/dev/null 2>&1; then
+  printf 'FAIL: remote installer accepted a missing commit\n' >&2
+  exit 1
+fi
+if "$ROOT/install.sh" --target="$PROJECT" --commit=0123456 >/dev/null 2>&1; then
+  printf 'FAIL: remote installer accepted a short commit\n' >&2
+  exit 1
+fi
+CAPTURE_FILE="$CAPTURE_FILE" PATH="$FAKEBIN:$PATH" \
+  "$ROOT/install.sh" --target="$PROJECT" --commit="$FULL_COMMIT" >/dev/null 2>&1 || true
+grep -qxF "https://codeload.github.com/MugenKaizen/Hekate/tar.gz/$FULL_COMMIT" "$CAPTURE_FILE"
+rm -f "$CAPTURE_FILE"
 
 # Fresh install contains executable runners, adapters, and migration state.
-"$ROOT/install.sh" --source="$ROOT" --target="$PROJECT" --agents=claude >/dev/null
+"$ROOT/install.sh" --source="$ROOT" --target="$PROJECT" --agents=claude --commit="$FULL_COMMIT" >/dev/null
 [ -x "$PROJECT/.workflow/bin/hekate-agent" ]
 [ -f "$PROJECT/.workflow/bin/hekate-agent.ps1" ]
 [ -f "$PROJECT/.workflow/session.local.yml" ]
@@ -20,6 +46,21 @@ grep -qxF '    - 003-add-cross-harness-orchestration' "$PROJECT/.workflow/state.
 grep -qxF '    - 004-add-routing-profiles' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 005-add-session-subagent-policy' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 006-relocate-agent-skills' "$PROJECT/.workflow/state.yml"
+grep -qxF "  installed_ref: $FULL_COMMIT" "$PROJECT/.workflow/state.yml"
+
+if sh "$ROOT/update.sh" --target="$PROJECT" >/dev/null 2>&1; then
+  printf 'FAIL: remote updater accepted a missing commit\n' >&2
+  exit 1
+fi
+if sh "$ROOT/update.sh" --target="$PROJECT" --commit=0123456 >/dev/null 2>&1; then
+  printf 'FAIL: remote updater accepted a short commit\n' >&2
+  exit 1
+fi
+CAPTURE_FILE="$CAPTURE_FILE" PATH="$FAKEBIN:$PATH" \
+  sh "$ROOT/update.sh" --target="$PROJECT" --commit="$FULL_COMMIT" >/dev/null 2>&1 || true
+grep -qxF "https://codeload.github.com/MugenKaizen/Hekate/tar.gz/$FULL_COMMIT" "$CAPTURE_FILE"
+sh "$ROOT/update.sh" --source="$ROOT" --target="$PROJECT" --commit="$FULL_COMMIT" >/dev/null
+grep -qxF "  installed_ref: $FULL_COMMIT" "$PROJECT/.workflow/state.yml"
 
 # Agent Skills use the portable .agents path for non-Claude adapters.
 PORTABLE_PROJECT="$TMP/portable-project"

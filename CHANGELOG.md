@@ -19,14 +19,15 @@ All notable changes to Hekate are documented here. The project follows
 
 ### Fixed
 
+- Network install and update now require a full commit SHA and use that same
+  immutable revision for the bootstrap script, downloaded snapshot, and
+  persisted installation state.
 - Normal doctor scans no longer fail merely because optional harness CLIs are
   absent.
 - Exact profile lookup prevents dotted names from aliasing another YAML entry;
   quoted values and reserved sentinels are handled consistently.
 - Migration 004 preserves forward schema versions and handles customized status
   blocks without a `default_harness` anchor.
-- Tag-pinned installation examples now pass the same tag to the installer's
-  `--ref` / `-Ref` option instead of downloading templates from `main`.
 
 ## [0.1.0-beta.1] - 2026-08-11
 
