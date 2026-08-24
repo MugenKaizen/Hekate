@@ -12,3 +12,9 @@ Thumbs.db
 # Local workflow state (if the tool is used inside its own repo)
 /.workflow/history/
 /.workflow/backups/
+/.workflow/runs/
+/.workflow/orchestration.local.yml
+/.workflow/session.local.yml
+
+# Agent session transcripts dropped in the working tree by external tools
+/session-*.md
