@@ -5,8 +5,11 @@ param(
     [string]$Repo = $(if ($env:AAW_REPO) { $env:AAW_REPO } else { 'MugenKaizen/Hekate' }),
     [string]$Ref = '',
     [string]$Commit = '',
+    [string]$Agents = '',
     [switch]$Force,
     [switch]$DryRun,
+    [switch]$Rollback,
+    [string]$RollbackName = '',
     [switch]$Help,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Rest
@@ -32,8 +35,13 @@ Flags:
   -Repo <owner/name> GitHub repository. Defaults to the built-in one.
   -Ref <git-ref>     Source revision metadata for local -Source development.
   -Commit <sha>      Full 40-character commit SHA. Required for downloads.
+  -Agents <list>     Comma-separated adapters to opt into on this update:
+                     claude,cursor,codex,copilot,gemini,aider.
   -Force             Overwrite locally edited managed files after confirmation.
   -DryRun            Show what would be done without making changes.
+  -Rollback           Restore the most recent (or a named) backup run instead of
+                      updating. See update-runner.ps1 -Help for details.
+  -RollbackName <run> Restore a specific backup run by its timestamp name. Implies -Rollback.
 '@ | Write-Host
 }
 
@@ -43,13 +51,17 @@ foreach ($arg in $Rest) {
     if ($arg -like '--repo=*') { $Repo = $arg.Substring(7); continue }
     if ($arg -like '--ref=*') { $Ref = $arg.Substring(6); continue }
     if ($arg -like '--commit=*') { $Commit = $arg.Substring(9); continue }
+    if ($arg -like '--agents=*') { $Agents = $arg.Substring(9); continue }
     if ($arg -eq '--force') { $Force = $true; continue }
     if ($arg -eq '--dry-run') { $DryRun = $true; continue }
+    if ($arg -like '--rollback=*') { $Rollback = $true; $RollbackName = $arg.Substring(11); continue }
+    if ($arg -eq '--rollback') { $Rollback = $true; continue }
     if ($arg -eq '-h' -or $arg -eq '--help') { $Help = $true; continue }
     Throw-Aaw "unknown arg: $arg"
 }
 
 if ($Help) { Show-AawHelp; exit 0 }
+if ($RollbackName) { $Rollback = $true }
 
 if ($Ref -and $Commit) { Throw-Aaw 'use either -Ref or -Commit' }
 if ($Commit -and $Commit -notmatch '^[0-9a-fA-F]{40}$') { Throw-Aaw '-Commit must be a full 40-character hexadecimal SHA' }
@@ -84,8 +96,11 @@ try {
 
     $runnerArgs = @('-Target', $Target, '-Repo', $Repo, '-Ref', $requestedRev)
     if ($Commit) { $runnerArgs += @('-Commit', $Commit) }
+    if ($Agents) { $runnerArgs += @('-Agents', $Agents) }
     if ($DryRun) { $runnerArgs += '-DryRun' }
     if ($Force) { $runnerArgs += '-Force' }
+    if ($RollbackName) { $runnerArgs += @('-RollbackName', $RollbackName) }
+    elseif ($Rollback) { $runnerArgs += '-Rollback' }
 
     Write-AawLog 'starting update runner from snapshot'
     $engineName = 'powershell.exe'
