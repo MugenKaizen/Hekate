@@ -5,7 +5,7 @@ param(
     [string]$Source = '',
     [string]$Ref = '',
     [string]$Commit = '',
-    [string]$Repo = $(if ($env:AAW_REPO) { $env:AAW_REPO } else { 'MugenKaizen/Hekate' }),
+    [string]$Repo = $(if ($env:HEKATE_REPO) { $env:HEKATE_REPO } else { 'MugenKaizen/Hekate' }),
     [switch]$Force,
     [switch]$Yes,
     [switch]$DryRun,
@@ -18,9 +18,9 @@ Set-StrictMode -Version 2.0
 
 $installTmp = ''
 
-function Write-AawLog { param([string]$Message) Write-Host "[aaw] $Message" }
-function Write-AawWarn { param([string]$Message) Write-Warning "[aaw] $Message" }
-function Throw-Aaw { param([string]$Message) throw "[aaw] ERROR: $Message" }
+function Write-AawLog { param([string]$Message) Write-Host "[hekate] $Message" }
+function Write-AawWarn { param([string]$Message) Write-Warning "[hekate] $Message" }
+function Throw-Aaw { param([string]$Message) throw "[hekate] ERROR: $Message" }
 function Join-AawPath { param([string]$Root, [string]$RelativePath) $p = $Root; foreach ($part in ($RelativePath -split '[\\/]+')) { if ($part) { $p = Join-Path $p $part } }; $p }
 function Ensure-AawParentDirectory { param([string]$Path) $parent = Split-Path -Parent $Path; if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null } }
 
@@ -231,7 +231,7 @@ try {
     } else {
         if (-not $Commit) { Throw-Aaw 'remote installation requires -Commit <full-40-character-sha>' }
         $script:INSTALLED_REV = $Commit
-        $cleanupDir = Join-Path ([System.IO.Path]::GetTempPath()) ('aaw-' + [guid]::NewGuid().ToString('N'))
+        $cleanupDir = Join-Path ([System.IO.Path]::GetTempPath()) ('hekate-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force -Path $cleanupDir | Out-Null
         $zip = Join-Path $cleanupDir 'src.zip'
         $url = "https://codeload.github.com/$Repo/zip/$Commit"
@@ -257,7 +257,7 @@ try {
     $script:BACKUP_ROOT = Join-AawPath $Target '.workflow/backups'
     $script:RUN_TIMESTAMP = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     $script:RUN_BACKUP_DIR = Join-AawPath $script:BACKUP_ROOT $script:RUN_TIMESTAMP
-    $installTmp = Join-Path ([System.IO.Path]::GetTempPath()) ('aaw-install-' + [guid]::NewGuid().ToString('N'))
+    $installTmp = Join-Path ([System.IO.Path]::GetTempPath()) ('hekate-install-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $installTmp | Out-Null
     $script:BACKED_UP_LIST_FILE = Join-Path $installTmp 'backed-up-files.txt'
     New-Item -ItemType File -Force -Path $script:BACKED_UP_LIST_FILE | Out-Null
@@ -275,10 +275,10 @@ try {
         $overwrite = @($script:PLAN_LIST | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
         if ($overwrite.Count -gt 0) {
             Write-AawWarn "-Force enabled; $($overwrite.Count) existing file(s) will be overwritten (backed up first into $($script:RUN_BACKUP_DIR)):"
-            foreach ($path in $overwrite) { Write-Host "[aaw]   - $path" }
+            foreach ($path in $overwrite) { Write-Host "[hekate]   - $path" }
 
             if (-not $DryRun -and -not $Yes) {
-                $answer = Read-Host '[aaw] Continue? Type "yes" to proceed'
+                $answer = Read-Host '[hekate] Continue? Type "yes" to proceed'
                 if ($answer -ne 'yes') { Throw-Aaw 'install cancelled' }
             }
         }

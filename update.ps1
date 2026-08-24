@@ -2,7 +2,7 @@
 param(
     [string]$Target = (Get-Location).Path,
     [string]$Source = '',
-    [string]$Repo = $(if ($env:AAW_REPO) { $env:AAW_REPO } else { 'MugenKaizen/Hekate' }),
+    [string]$Repo = $(if ($env:HEKATE_REPO) { $env:HEKATE_REPO } else { 'MugenKaizen/Hekate' }),
     [string]$Ref = '',
     [string]$Commit = '',
     [string]$Agents = '',
@@ -17,8 +17,8 @@ param(
 
 Set-StrictMode -Version 2.0
 
-function Write-AawLog { param([string]$Message) Write-Host "[aaw] $Message" }
-function Throw-Aaw { param([string]$Message) throw "[aaw] ERROR: $Message" }
+function Write-AawLog { param([string]$Message) Write-Host "[hekate] $Message" }
+function Throw-Aaw { param([string]$Message) throw "[hekate] ERROR: $Message" }
 
 function Show-AawHelp {
 @'
@@ -67,7 +67,7 @@ if ($Ref -and $Commit) { Throw-Aaw 'use either -Ref or -Commit' }
 if ($Commit -and $Commit -notmatch '^[0-9a-fA-F]{40}$') { Throw-Aaw '-Commit must be a full 40-character hexadecimal SHA' }
 if (-not $Source -and -not $Commit) { Throw-Aaw 'remote update requires -Commit <full-40-character-sha>' }
 
-$tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('aaw-update-' + [guid]::NewGuid().ToString('N'))
+$tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('hekate-update-' + [guid]::NewGuid().ToString('N'))
 
 try {
     New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null

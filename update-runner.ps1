@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Target = (Get-Location).Path,
-    [string]$Repo = $(if ($env:AAW_REPO) { $env:AAW_REPO } else { 'MugenKaizen/Hekate' }),
+    [string]$Repo = $(if ($env:HEKATE_REPO) { $env:HEKATE_REPO } else { 'MugenKaizen/Hekate' }),
     [string]$Ref = 'HEAD',
     [string]$Commit = '',
     [string]$Agents = '',
@@ -27,7 +27,7 @@ foreach ($arg in $Rest) {
     if ($arg -like '--rollback=*') { $Rollback = $true; $RollbackName = $arg.Substring(11); continue }
     if ($arg -eq '--rollback') { $Rollback = $true; continue }
     if ($arg -eq '-h' -or $arg -eq '--help') { $Help = $true; continue }
-    throw "[aaw] ERROR: unknown arg: $arg"
+    throw "[hekate] ERROR: unknown arg: $arg"
 }
 
 if ($Help) {
@@ -69,7 +69,7 @@ $script:FORCE = [bool]$Force
 $script:ROLLBACK = [bool]$Rollback
 $script:ROLLBACK_NAME = $RollbackName
 $script:RUNNER_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
-$script:TMP_ROOT = Join-Path ([System.IO.Path]::GetTempPath()) ('aaw-runner-' + [guid]::NewGuid().ToString('N'))
+$script:TMP_ROOT = Join-Path ([System.IO.Path]::GetTempPath()) ('hekate-runner-' + [guid]::NewGuid().ToString('N'))
 
 function Join-AawPathEarly {
     param([string]$Root, [string]$RelativePath)
@@ -195,7 +195,7 @@ function Update-AawSkills {
 function Confirm-AawForceUpdate {
     if (-not $script:FORCE -or $script:DRY_RUN) { return }
     Write-AawWarn '--force enabled; locally edited template-managed files will be overwritten after backup.'
-    $answer = Read-Host '[aaw] Continue? Type "yes" to proceed'
+    $answer = Read-Host '[hekate] Continue? Type "yes" to proceed'
     if ($answer -ne 'yes') { Throw-Aaw 'update cancelled' }
 }
 
