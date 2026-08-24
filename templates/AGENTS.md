@@ -5,11 +5,15 @@ Copilot, Aider, Gemini CLI, etc.) working on this project. Other
 agent-specific files (`CLAUDE.md`, `.cursor/rules/*`, and so on) must
 point here.
 
-> **Rule #0.** Before doing anything in this project, read this file in
-> full and read only `.workflow/status.yml` for the fast pre-flight check.
-> Do not load all `.workflow/*.yml` at startup. Lazy-load the detailed
-> configs only when the task needs them. Do not read `.workflow/bootstrap.md`
-> unless initialization is required.
+> **Rule #0.** Before doing anything in this project: read this file in full
+> (it is a short, always-load core — roughly 100 lines) and read
+> `.workflow/status.yml` for the fast pre-flight check. Everything else —
+> the full history file format, cross-harness delegation mechanics,
+> native-subagent policy detail, and every `.workflow/*.yml` config — is
+> lazy-loaded per §1.1, **only** when the current task actually needs it.
+> Loading this file is cheap by design; do not defeat that by speculatively
+> reading the lazy-loaded files below "just in case." Do not read
+> `.workflow/bootstrap.md` unless initialization is required.
 
 ---
 
@@ -25,8 +29,8 @@ point here.
    `unknown` — **stop**, read `.workflow/bootstrap.md`, and run or refresh that
    procedure. Do not write code, do not create plans, do not make edits until
    initialization is complete and `.workflow/status.yml` is updated.
-4. If the fast check passes — proceed to **Task workflow**. When deciding which
-   stages are mandatory, use `status.yml → features`. Read
+4. If the fast check passes — proceed to **§3 Task workflow**. When deciding
+   which stages are mandatory, use `status.yml → features`. Read
    `.workflow/workflow.yml` only if a needed rule is not represented in
    `status.yml`. Use `status.yml → orchestration` to decide whether external
    harness routing is available.
@@ -50,34 +54,25 @@ current task needs the information:
   user explicitly asks to initialize the workflow.
 - `.workflow/orchestration.yml` — only when `status.yml → orchestration.enabled`
   is true and the task needs cross-harness delegation or model routing.
+- `.workflow/delegation.md` — only alongside `orchestration.yml`, when a task
+  actually delegates to an external CLI harness (§3.6 lives here now).
 - `.workflow/session.local.yml` — only before considering a native-subagent
   delegation wave or when the user asks to change its policy.
+- `.workflow/subagents.md` — only before the first native-subagent wave of a
+  session, or when changing that policy (§1.2 detail lives here now).
+- `.workflow/history-format.md` — only when creating or updating a task
+  history entry (Plan and Verify stages; §4 detail lives here now).
 
-### 1.2 Native-subagent session policy
+### 1.2 Native-subagent session policy (summary)
 
-The primary harness may use its native subagents for bounded advisory, research,
-review, validation, or execution work, while retaining all architecture,
-decomposition, orchestration, and acceptance authority.
-
-Before the first native-subagent wave, read
-`.workflow/status.yml → native_subagents.policy` (normally
-`.workflow/session.local.yml`). Resolve `subagents.mode` as follows:
-
-- `off` — do not launch native subagents; the primary handles the task itself.
-- `ask` — before each exact delegation wave, show the user the proposed agent
-  count, roles, scope, and write authority, then wait for approval. One approval
-  covers only that named wave; additions or later waves require another approval.
-- `auto` — the primary may launch native subagents at its discretion without a
-  separate question for each wave.
-
-Missing, unreadable, or invalid policy means `ask`. Only an explicit user choice
-may change the mode to `off` or `auto`; the primary writes that choice to the
-local policy file and the user may change it at any time. `auto` never grants
-permission to push, merge, release, perform destructive actions, bypass the
-one-writer rule, or transfer primary-harness ownership. Native-subagent policy
-is separate from external CLI harness availability in `orchestration.yml`.
-Every child remains a bounded executor/advisor and must not recursively
-orchestrate or delegate.
+The primary harness may use its native subagents for bounded advisory,
+research, review, validation, or execution work, while retaining all
+architecture, decomposition, orchestration, and acceptance authority.
+`subagents.mode` (from `.workflow/session.local.yml`) is `off` (never
+launch), `ask` (approve each exact wave — the default when missing/invalid),
+or `auto` (launch at the primary's discretion; still no push/merge/release/
+destructive/recursive-delegation authority). Before the first wave of a
+session, or to change the mode, read `.workflow/subagents.md` in full.
 
 ---
 
@@ -91,225 +86,83 @@ workflow" / "/init-workflow".
 
 ---
 
-## 3. Task workflow (task execution cycle)
+## 3. Task workflow (task execution cycle, in brief)
 
-For **every non-trivial task**, this order is required:
+For **every non-trivial task**, this order is required: **Analyze → Options →
+Plan → Execute → Verify**, plus optional cross-harness delegation during
+Execute. Every rule below is mandatory when its stage applies; none of it is
+optional reading — only the deep-dive files linked from each stage are
+lazy-loaded.
 
-### 3.1. Analyze
+### 3.1 Analyze
 
-- Understand **what** is being asked and **why**. If the goal is unclear,
-  ask clarifying questions before starting the analysis.
-- Find and read the affected files. Don't guess — read.
-- Lazy-load only the applicable sections of `.workflow/architecture.yml` and
-  `.workflow/conventions.yml`.
-- Decide whether `status.yml → features.light_tdd` applies to this task.
-  For behavior changes, identify which test should be added or updated first.
-- If `status.yml → features.granular_commits` is enabled, decide whether the
-  task is large. A large task has at least 2 independently verifiable
-  checkpoints that can be completed and committed without leaving the branch in
-  a broken state.
-- Record the constraints: which invariants must not be violated, which
-  modules must not be touched.
+Understand what and why (ask if unclear); read the affected files, don't
+guess. Lazy-load only the applicable sections of `architecture.yml` and
+`conventions.yml`. Decide whether `light_tdd` applies and, for behavior
+changes, which test comes first. If `granular_commits` is enabled, decide
+whether the task is large (≥2 independently verifiable, committable
+checkpoints). Record constraints: invariants and modules that must not be
+touched.
 
-### 3.2. Options
+### 3.2 Options
 
-- Propose **at least 2 options** for the solution (unless `status.yml`
-  allows skipping for trivial tasks).
-- For each option — **pros** and **cons**. The cons must include
-  architectural rule violations if there are any.
-- Explicitly recommend one and justify the choice.
-- Wait for the user's agreement on an option before writing the plan.
+Propose **at least 2 options** (unless `status.yml` allows skipping for
+trivial tasks), each with pros/cons (cons must include architecture-rule
+violations). Recommend one and justify it. Wait for the user's agreement
+before writing the plan.
 
-### 3.3. Plan
+### 3.3 Plan
 
-The plan is written to `.workflow/history/YYYY-MM-DD-<slug>.md` and must
-be **self-contained** — it can be opened in a new session without context
-and executed. The plan must include:
+Write a **self-contained** plan to `.workflow/history/YYYY-MM-DD-<slug>.md` —
+context, affected files, atomic steps, verification, rollback notes, and (for
+large tasks under `granular_commits`) a checkpoint checklist. See
+`.workflow/history-format.md` for the exact template and field rules. When
+`light_tdd` applies, steps should add/update a focused test first, run the
+narrowest check to see it fail, then implement the minimum to pass (or state
+why test-first is impractical and add the test right after). Wait for plan
+approval before executing.
 
-1. **Context** — why this task exists, what problem it solves.
-2. **Affected files** — full paths of every file to be created or
-   modified, with a short description of the changes.
-3. **Steps** — step-by-step actions. Each step is an atomic change.
-4. **Verification** — how to confirm the task is done (test commands,
-   manual check scenarios, expected behavior).
-5. **Rollback notes** — what to do if something goes wrong (for risky
-   changes).
-6. **Checkpoint checklist** — required for large tasks when
-   `status.yml → features.granular_commits` is `true`.
+### 3.4 Execute
 
-When `status.yml → features.light_tdd` applies, the steps should reflect a
-lightweight TDD loop: add or update a focused test first, run the narrowest
-relevant check if practical to see it fail, then implement the minimum code
-needed to make it pass. If test-first is impractical, explicitly state why in
-Analysis or Plan and add the test immediately after implementation.
+Follow the plan step by step; if it turns out wrong, stop, update it, get
+re-approval. Follow the resolved `light_tdd` mode (default `strict-lite`:
+test-first unless a stated reason not to). If `granular_commits` applies,
+execute checkpoint by checkpoint, mark each complete in the task history after
+verification, and commit per the resolved mode (`auto` → commit immediately;
+`ask` → confirm with the user first). Commit messages follow
+`conventions.yml`. No unrequested refactors, no undiscussed dependencies (see
+`workflow.yml → scope_control`).
 
-When `status.yml → features.granular_commits` applies, the plan must include
-checkpoint boundaries in the same history file. Each checkpoint must describe:
+### 3.5 Verify
 
-- the slice of work being completed;
-- the verification required before it counts as done;
-- the commit message to use after successful verification.
+Run the Verification commands. If light TDD was bypassed, confirm the
+follow-up test was added and passes. Update checkpoint status and append
+`checkpoint_completed` / `checkpoint_committed` events as they happen. Update
+the plan file's `Result` section (what was done, what was checked, known
+limitations), then append a `verified` event to
+`.workflow/history/events.jsonl`. Full event schema and allowed `type` values
+are in `.workflow/history-format.md`.
 
-Wait for plan approval before executing.
+### 3.6 Optional cross-harness delegation
 
-### 3.4. Execute
-
-- Follow the plan step by step.
-- If along the way you realize the plan is wrong — stop, update the plan,
-  get re-approval.
-- For non-trivial behavior changes, follow `status.yml → features.light_tdd`.
-  The default mode is `strict-lite`: use test-first unless there is a clear,
-  stated reason not to.
-- If `status.yml → features.granular_commits` applies, execute checkpoint by
-  checkpoint. After a checkpoint is verified, mark it complete in the task
-  history and handle the commit according to the resolved granular-commits mode:
-  - `auto` — create the commit immediately.
-  - `ask` — stop and ask the user before creating the commit.
-- Commit messages for checkpoints must follow `.workflow/conventions.yml`.
-- Don't do unrequested refactors and don't add dependencies that aren't
-  in the plan (see `workflow.yml → scope_control`).
-
-### 3.5. Verify
-
-- Run the commands from the Verification section.
-- If light TDD was bypassed, verify that the follow-up test was still added
-  and passes.
-- For tasks with checkpoint checklists, update the checklist status after each
-  verified checkpoint and append `checkpoint_completed` /
-  `checkpoint_committed` events when they happen.
-- Update the `result` section in the task history file: what was done,
-  what was checked, known limitations.
-- Append an event to `.workflow/history/events.jsonl`:
-  `{"ts": "<ISO-8601>", "task_slug": "<slug>", "type": "verified", "summary": "<1 line>"}`.
-
-### 3.6. Optional cross-harness delegation
-
-When `.workflow/status.yml → orchestration.enabled` is `true`, the **primary
-harness** — the current user-facing agent session — may delegate a bounded task
-to a configured child harness through the project-local job controller. The
-primary harness exclusively owns architecture, task decomposition, profile and
-model routing, subagent/harness orchestration, review, and final verification:
-
-```sh
-.workflow/bin/hekate-agent run --profile <profile> \
-  --task-file <self-contained-task.md>
-# Or bypass the implicit profile explicitly:
-.workflow/bin/hekate-agent run --harness pi --model <model> --effort high \
-  --task-file <self-contained-task.md>
-```
-
-On Windows use:
-
-```powershell
-.\.workflow\bin\hekate-agent.ps1 run --profile <profile> `
-  --task-file <self-contained-task.md>
-```
-
-Runs are background by default and return a job id. Use `status`, `logs`,
-`wait`, `result`, and `stop` with that id. `config use-profile` selects a local
-profile; `config use` selects a local harness and deliberately bypasses an
-inherited project profile. Neither modifies committed project config. Read
-`.workflow/orchestration.yml` for the declarative registry only when routing a
-task.
-
-When named profiles exist, classify before launch; never ask the runner to infer
-from prompt text:
-
-- `small` — narrow, low-risk, usually one concern or mechanical change;
-- `medium` — normal non-trivial coding with bounded multi-file reasoning;
-- `complex` — high-risk or multi-system execution under architecture already
-  decided by the primary harness;
-- `small-deep` (optional) — narrow scope that still needs unusually deep
-  reasoning.
-
-Use the configured matching profile, or an explicit profile chosen by the user.
-CLI `--model` / `--effort` may override profile values for one run.
-
-Delegation rules:
-
-- Delegation transfers execution or advisory work, never ownership. A child is
-  a bounded executor/advisor: it must not redesign architecture, decompose the
-  parent task, choose its own route/profile, launch subagents or harnesses, or
-  recursively delegate. If its slice requires such a decision, it stops and
-  returns the decision to the primary harness.
-- The primary harness creates the task contract, chooses the child/profile, and
-  invokes `run` directly. A lifecycle helper may only monitor an existing job
-  ID; it cannot start jobs or take over routing or orchestration.
-- The task file must be self-contained: scope, allowed writes, expected output,
-  child role, prohibited re-delegation, and verification commands.
-- Never run two writer agents in the same checkout. Concurrent writers require
-  separate git worktrees; advisory/review agents should be explicitly read-only.
-- A child result is evidence, not acceptance. The parent remains responsible for
-  reviewing the diff, running verification, and making product/scope decisions.
-- Do not bypass permissions or broaden cwd access merely to make unattended work
-  succeed. The controller restricts cwd to the project root unless the committed
-  config deliberately opts out.
-- Harness flags are version-sensitive. Use `hekate-agent doctor` after CLI
-  upgrades and update the registry rather than inventing shell wrappers.
+When `.workflow/status.yml → orchestration.enabled` is `true`, the primary
+harness may delegate a bounded task to a configured child CLI harness via
+`.workflow/bin/hekate-agent`, while retaining architecture, decomposition,
+routing, review, and final-verification ownership. Read
+`.workflow/delegation.md` in full before the first delegation of a session —
+it has the exact commands, profile classes, and the non-negotiable delegation
+rules (one writer per checkout, no re-delegation, child result is evidence
+not acceptance, never bypass permissions to make an unattended run "succeed").
 
 ---
 
 ## 4. History (.workflow/history/)
 
-This directory is **in `.gitignore`** and is not shared with the team. It
-exists so the agent has continuity between sessions.
-
-### 4.1. Markdown per task
-
-`.workflow/history/YYYY-MM-DD-<kebab-slug>.md`:
-
-```markdown
-# <Task title>
-
-## Analysis
-<what was understood, which files were studied, which constraints apply>
-
-## Options
-### Option 1: <name>
-- Pros: …
-- Cons: …
-### Option 2: <name>
-- Pros: …
-- Cons: …
-**Chosen:** Option N — <rationale>
-
-## Plan
-### Context
-### Affected files
-### Steps
-### Verification
-### Rollback notes
-
-## Checkpoint checklist
-- [ ] CP1. <checkpoint title>
-  - Verify: <command or scenario>
-  - Commit: <message>
-- [x] CP2. <checkpoint title>
-  - Verify: <command or scenario>
-  - Commit: <message>
-
-## Result
-<what was done, checks performed, remaining TODOs>
-```
-
-The `Checkpoint checklist` section is required only for large tasks when
-`status.yml → features.granular_commits` is `true`.
-
-### 4.2. events.jsonl
-
-Every significant state change — one JSON line:
-
-```json
-{"ts":"2026-04-22T10:15:00Z","task_slug":"add-user-export","type":"started","summary":"user asked to add CSV export"}
-{"ts":"2026-04-22T10:18:00Z","task_slug":"add-user-export","type":"analyzed","summary":"touched files: src/users/*, src/export/*"}
-{"ts":"2026-04-22T10:22:00Z","task_slug":"add-user-export","type":"options_proposed","summary":"2 options: streaming vs buffered"}
-{"ts":"2026-04-22T10:25:00Z","task_slug":"add-user-export","type":"planned","summary":"see history/2026-04-22-add-user-export.md"}
-{"ts":"2026-04-22T10:33:00Z","task_slug":"add-user-export","type":"checkpoint_completed","summary":"CP1 tests added and passing"}
-{"ts":"2026-04-22T10:35:00Z","task_slug":"add-user-export","type":"checkpoint_committed","summary":"test(users): cover export validation"}
-{"ts":"2026-04-22T10:40:00Z","task_slug":"add-user-export","type":"verified","summary":"tests green, manual export of 10k rows OK"}
-```
-
-Allowed `type` values: `started | analyzed | options_proposed | planned | checkpoint_completed | checkpoint_committed | executed | verified | blocked`.
+Gitignored, per-developer continuity, not a shared project artifact. Every
+non-trivial task gets `history/YYYY-MM-DD-<slug>.md` (Analysis / Options /
+Plan / Result, plus a checkpoint checklist when `granular_commits` applies)
+and events in `history/events.jsonl`. Full template and event schema:
+`.workflow/history-format.md` (read only during Plan/Verify — see §1.1).
 
 ---
 
@@ -324,15 +177,24 @@ Allowed `type` values: `started | analyzed | options_proposed | planned | checkp
 
 ---
 
-## 6. References
+## 6. References (pointer index)
 
-- `.workflow/stack.yml` — technology stack
-- `.workflow/architecture.yml` — architecture
-- `.workflow/conventions.yml` — code style and conventions
-- `.workflow/workflow.yml` — agent's working rules
-- `.workflow/status.yml` — fast pre-flight index; read before any work
-- `.workflow/bootstrap.md` — initialization procedure; read only when pre-flight fails
-- `.workflow/orchestration.yml` — optional cross-harness registry and project defaults
-- `.workflow/session.local.yml` — gitignored native-subagent permission policy
-- `.workflow/bin/hekate-agent` — persistent background job controller (no MCP/daemon)
-- `.workflow/README.md` — brief cheat sheet
+Always-load: `status.yml`. Everything else below is lazy-loaded per §1.1 —
+read only when the noted condition applies.
+
+| File | Read when |
+|---|---|
+| `.workflow/status.yml` | Always, at session start |
+| `.workflow/stack.yml` | Stack/command/dependency questions |
+| `.workflow/architecture.yml` | Module/layer/dependency/architecture decisions |
+| `.workflow/conventions.yml` | Creating/editing code, tests, docs, commits |
+| `.workflow/workflow.yml` | A process detail is missing from `status.yml` |
+| `.workflow/presets.yml` | Initialization, preset changes |
+| `.workflow/bootstrap.md` | Pre-flight fails, or `/init-workflow` requested |
+| `.workflow/orchestration.yml` | Orchestration enabled and task needs routing |
+| `.workflow/delegation.md` | Actually delegating to an external CLI harness |
+| `.workflow/session.local.yml` | Before a native-subagent wave, or changing policy |
+| `.workflow/subagents.md` | Before the first native-subagent wave, or changing policy |
+| `.workflow/history-format.md` | Creating/updating a task history entry |
+| `.workflow/bin/hekate-agent` | Invoking a delegated job (persistent background controller, no MCP/daemon) |
+| `.workflow/README.md` | Brief cheat sheet |

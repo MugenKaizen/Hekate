@@ -19,7 +19,14 @@ But in practice:
 
 2. **`AGENTS.md` is the single entry point.** All agent-specific files
    (`CLAUDE.md`, `.cursor/rules/*.mdc`, etc.) point to it.
-   Want to change behavior — change `AGENTS.md`, not N copies.
+   Want to change behavior — change `AGENTS.md`, not N copies. `AGENTS.md`
+   itself stays a compact, genuinely-always-read core: pre-flight check,
+   the task cycle in brief, scope control, and a pointer index. Detail that
+   is only needed situationally — the history file/event schema, cross-harness
+   delegation mechanics, native-subagent policy detail — lives in separate
+   `.workflow/*.md` files that are lazy-loaded per the conditions in
+   `AGENTS.md` §1.1, so "read this in full" stays cheap in practice, not just
+   in name.
 
 3. **Configs in YAML, not prose.** Stack, architecture, conventions are
    data, not documentation. YAML forces you to think in structure and
@@ -47,7 +54,10 @@ But in practice:
    MCP servers, or runtime dependencies. Shell/PowerShell + Markdown + YAML.
    Optional cross-harness orchestration is a project-local job-control script
    that starts ordinary CLI processes and persists inspectable files; it is not
-   a resident service. The primary user-facing harness retains architecture,
+   a resident service. Every shipped harness defaults to its least-privileged
+   non-interactive mode — a delegated child does not get unattended write
+   access to your checkout unless a team consciously opts in per harness. The
+   primary user-facing harness retains architecture,
    decomposition, orchestration, review, and final verification; children only
    execute or advise within bounded slices. Native subagents are also governed
    by a local user policy: disabled, approval before each exact wave, or

@@ -92,8 +92,9 @@ actually helps in practice is something only real use will show.
 - [Changelog](CHANGELOG.md)
 - [Release process](RELEASING.md)
 
-Release notes for `v0.1.0-beta.1` live in
-[`docs/releases/v0.1.0-beta.1.md`](docs/releases/v0.1.0-beta.1.md).
+Release notes live in [`docs/releases/`](docs/releases). The latest is
+[`v0.2.0-beta.1`](docs/releases/v0.2.0-beta.1.md), which contains two breaking
+changes.
 
 ## Installation
 
@@ -133,17 +134,24 @@ Supported flags:
 | Flag | Purpose |
 |------|---------|
 | `--target=<path>` | Where to install. Defaults to the current directory. |
-| `--agents=<list>` | Which adapters to lay down: `claude`, `cursor`, `codex`. Defaults to all. |
-| `--force` | Overwrite existing files. |
+| `--agents=<list>` | Which adapters to lay down: `claude`, `cursor`, `codex`, `copilot`, `gemini`, `aider`. Defaults to all. |
+| `--force` | Overwrite existing files. Every overwritten file is backed up first. |
+| `--yes` | Skip the `--force` confirmation prompt. Required when piping into `sh`. |
 | `--dry-run` | Show what would be done without making changes. |
 | `--commit=<sha>` | Full 40-character commit SHA. Required for network downloads. |
 | `--ref=<git-ref>` | Revision metadata for local `--source` development only. |
 | `--source=<path>` | Local copy of the repository (for debugging). |
 
 PowerShell accepts the same options as named parameters: `-Target`, `-Agents`,
-`-Force`, `-DryRun`, `-Commit`, `-Ref`, `-Source`, and `-Repo`. If Hekate is already
-installed, the installer refuses to rewrite migration state; use the update
+`-Force`, `-Yes`, `-DryRun`, `-Commit`, `-Ref`, `-Source`, and `-Repo`. If Hekate is
+already installed, the installer refuses to rewrite migration state; use the update
 command instead (or explicit `--force` / `-Force` to replace managed files).
+
+`--force` overwrites hand-filled configs such as `.workflow/stack.yml`, so it first
+lists every file it would replace, copies each into
+`.workflow/backups/<UTC-timestamp>/`, and asks for confirmation. A piped install
+(`curl … | sh`) has no terminal to prompt on and therefore **aborts without writing
+anything** unless you also pass `--yes` / `-Yes`.
 
 The commit SHA makes the downloaded content immutable; it does not prove who
 authored the commit. Obtain the expected SHA through a trusted channel. Branches,
@@ -152,13 +160,19 @@ tags, and short SHAs are deliberately rejected for network downloads.
 What will appear in the project:
 
 ```
-AGENTS.md                          # single source of truth
+AGENTS.md                          # single source of truth (compact always-read core)
 CLAUDE.md                          # → AGENTS.md (Claude Code adapter)
+GEMINI.md                          # → AGENTS.md (Gemini CLI adapter)
+.aider.conf.yml                    # → AGENTS.md (Aider adapter)
+.github/copilot-instructions.md    # → AGENTS.md (Copilot adapter)
 .cursor/rules/workflow.mdc         # Cursor adapter
 .claude/commands/                  # /init-workflow, /analyze, /plan, /harness
 .claude/agents/                    # optional harness job lifecycle monitor
 .claude/skills/                    # Agent Skills for Claude Code
-.agents/skills/                    # shared Agent Skills for Cursor and Codex
+.agents/skills/                    # shared Agent Skills for the non-Claude adapters
+.workflow/delegation.md            # lazy-loaded: cross-harness delegation mechanics
+.workflow/subagents.md             # lazy-loaded: native-subagent policy detail
+.workflow/history-format.md        # lazy-loaded: task history + events.jsonl schema
 .workflow/stack.yml                # fill in at initialization
 .workflow/architecture.yml
 .workflow/conventions.yml
@@ -234,8 +248,17 @@ Update behavior:
 - If a template-managed file has local edits, the updater leaves it in place
   and writes `<file>.new` next to it for manual review. With `--force`, the
   updater warns, asks for confirmation, then overwrites those files after backup.
-- Before changing any existing file, the updater stores a single latest backup
-  copy in `.workflow/backups/`.
+- Before changing any existing file, the updater copies it into a per-run
+  directory `.workflow/backups/<UTC-timestamp>/`, preserving relative paths. The
+  five most recent runs are kept and older ones pruned. Each run is recorded in
+  `.workflow/state.yml → schema.history` with its timestamp, refs, backup
+  directory, and the migrations it applied.
+- `update-runner.sh --rollback` (or `--rollback=<timestamp>`; `-Rollback` /
+  `-RollbackName` in PowerShell) restores a recorded run, including the
+  `state.yml` that rewinds `applied_migrations`. It refuses to act when no
+  backup exists or the run name is malformed.
+- `--agents=<list>` / `-Agents` on an update opts an existing installation into
+  an adapter it does not yet have, without a reinstall.
 - Older installations without `.workflow/state.yml` are handled in a safe
   legacy mode: YAML migrations still run, but edited template files are not
   overwritten automatically.
@@ -287,6 +310,15 @@ Typical classes are `small`, `medium`, `complex`, plus optional `small-deep`;
 the parent agent classifies the task, and the runner never guesses from prompt
 text. Explicit `--model` and `--effort` override a profile for one run.
 
+Each harness that supports unattended edits ships as **two entries**: an
+advisory one (`claude`, `codex`, `aider`, …) locked to the CLI's least-privileged
+non-interactive mode, and a writer twin (`claude-write`, `codex-write`, …) that
+may edit files. Nothing has to be uncommented to enable writes — the primary
+harness picks the entry per task, so `run --harness claude-write` makes write
+authority visible at the call site. Writer twins use each tool's *middle* tier
+(`acceptEdits`, `workspace-write`, `auto_edit`), never its bypass-everything
+mode, and require a dedicated git worktree.
+
 The committed registry is `.workflow/orchestration.yml`; local selection goes
 to `.workflow/orchestration.local.yml`. Registry commands and flags are
 version-sensitive and should be checked with `hekate-agent doctor` after CLI
@@ -302,6 +334,11 @@ sh -n install.sh update.sh update-runner.sh migrations/*.sh \
 ```
 
 Tests use fake harness executables and never contact paid model APIs.
+
+`./tests/run.sh` runs the POSIX suite, then runs the PowerShell suite
+(`tests/run.ps1`) when `pwsh` or `powershell` is on `PATH` and prints a
+`SKIPPED` notice when it is not. The PowerShell half of the codebase is
+therefore unverified on machines without a PowerShell interpreter.
 
 ## Philosophy
 
@@ -329,6 +366,9 @@ templates/              # what gets deployed into the project
     claude/             # CLAUDE.md, commands/, agents/
     cursor/             # .cursor/rules/
     codex/              # reference (Codex reads AGENTS.md directly)
+    copilot/            # .github/copilot-instructions.md
+    gemini/             # GEMINI.md
+    aider/              # .aider.conf.yml
   gitignore.snippet
 docs/
 ```

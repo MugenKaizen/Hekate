@@ -77,8 +77,14 @@ chmod +x "$PROJECT/.workflow/bin/hekate-agent"
 cat > "$FAKEBIN/pi" <<'EOF'
 #!/usr/bin/env sh
 printf 'pi-args:'
-for arg in "$@"; do printf '<%s>' "$arg"; [ "$arg" != SLOW ] || sleep 30; done
+code=""
+for arg in "$@"; do
+  printf '<%s>' "$arg"
+  [ "$arg" != SLOW ] || sleep 30
+  case "$arg" in FAIL:*) code="${arg#FAIL:}" ;; esac
+done
 printf '\n'
+[ -z "$code" ] || exit "$code"
 EOF
 cat > "$FAKEBIN/claude" <<'EOF'
 #!/usr/bin/env sh
@@ -246,13 +252,46 @@ if $CLI run --harness pi --cwd "$TMP" --task escape >/dev/null 2>&1; then fail '
 [ ! -e "$PROJECT/touch-pwned" ] || fail 'shell injection occurred'
 [ ! -e "$PROJECT/.workflow/escaped" ] || fail 'job path traversal occurred'
 
+# Unified job-directory field names (must match hekate-agent.ps1 exactly).
+field_job=$($CLI run --harness pi --task 'field name check')
+$CLI wait "$field_job" || fail 'field name check job did not complete'
+[ -f ".workflow/runs/$field_job/task.md" ] || fail 'unified field: task.md missing'
+[ -f ".workflow/runs/$field_job/exit-code" ] || fail 'unified field: exit-code missing'
+[ -f ".workflow/runs/$field_job/started-at" ] || fail 'unified field: started-at missing'
+[ -f ".workflow/runs/$field_job/finished-at" ] || fail 'unified field: finished-at missing'
+[ -f ".workflow/runs/$field_job/child-pid" ] || fail 'unified field: child-pid missing'
+[ -f ".workflow/runs/$field_job/worker-token" ] || fail 'unified field: worker-token missing'
+[ ! -e ".workflow/runs/$field_job/pid" ] || fail 'legacy field: pid should not exist (renamed to child-pid)'
+[ ! -e ".workflow/runs/$field_job/prompt.md" ] || fail 'legacy field: prompt.md should not exist (renamed to task.md)'
+
+# `wait` returns the harness's actual exit code, not a hardcoded 0/1.
+fail_job=$($CLI run --harness pi --task 'FAIL:7')
+wait_rc=0; $CLI wait "$fail_job" || wait_rc=$?
+[ "$wait_rc" -ne 0 ] || fail 'wait on a failing job returned success'
+[ "$wait_rc" -eq 7 ] || fail "wait did not propagate the harness exit code (got $wait_rc, expected 7)"
+[ "$(cat ".workflow/runs/$fail_job/exit-code")" = 7 ] || fail 'exit-code field did not record 7'
+
+ok_job=$($CLI run --harness pi --task 'wait success')
+$CLI wait "$ok_job" || fail 'wait on a successful job did not return 0'
+
 # stop only acts on an active, verified worker and updates lifecycle state.
 slow_job=$($CLI run --harness pi --task SLOW)
 i=0
 while [ "$(cat ".workflow/runs/$slow_job/status")" != running ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+[ -s ".workflow/runs/$slow_job/worker-token" ] || fail 'worker-token was not written at worker start'
 $CLI stop "$slow_job"
 [ "$(cat ".workflow/runs/$slow_job/status")" = stopped ] || fail 'stop did not persist state'
 if $CLI stop "$slow_job" >/dev/null 2>&1; then fail 'completed stop was accepted twice'; fi
+
+# A worker-token whose recorded start-time does not match the live process's
+# actual start time (a spoofed/foreign token) must not be treated as
+# verified: stop must refuse to signal.
+spoof=.workflow/runs/manual-spoof
+mkdir -p "$spoof"
+printf 'running\n' > "$spoof/status"; printf '%s\n' "$$" > "$spoof/worker-pid"
+printf '%s:not-a-real-start-time\n' "$$" > "$spoof/worker-token"
+printf 'pi\n' > "$spoof/harness"; printf 'fake/model\n' > "$spoof/model"; printf 'low\n' > "$spoof/effort"; printf '%s\n' "$PROJECT" > "$spoof/cwd"
+if $CLI stop manual-spoof >/dev/null 2>&1; then fail 'stop signaled a PID whose worker-token start-time did not match'; fi
 
 # Orphan detection is persisted and wait returns instead of hanging.
 orphan=.workflow/runs/manual-orphan

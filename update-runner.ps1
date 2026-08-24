@@ -4,8 +4,11 @@ param(
     [string]$Repo = $(if ($env:AAW_REPO) { $env:AAW_REPO } else { 'MugenKaizen/Hekate' }),
     [string]$Ref = 'HEAD',
     [string]$Commit = '',
+    [string]$Agents = '',
     [switch]$Force,
     [switch]$DryRun,
+    [switch]$Rollback,
+    [string]$RollbackName = '',
     [switch]$Help,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Rest
@@ -18,8 +21,11 @@ foreach ($arg in $Rest) {
     if ($arg -like '--repo=*') { $Repo = $arg.Substring(7); continue }
     if ($arg -like '--ref=*') { $Ref = $arg.Substring(6); continue }
     if ($arg -like '--commit=*') { $Commit = $arg.Substring(9); continue }
+    if ($arg -like '--agents=*') { $Agents = $arg.Substring(9); continue }
     if ($arg -eq '--force') { $Force = $true; continue }
     if ($arg -eq '--dry-run') { $DryRun = $true; continue }
+    if ($arg -like '--rollback=*') { $Rollback = $true; $RollbackName = $arg.Substring(11); continue }
+    if ($arg -eq '--rollback') { $Rollback = $true; continue }
     if ($arg -eq '-h' -or $arg -eq '--help') { $Help = $true; continue }
     throw "[aaw] ERROR: unknown arg: $arg"
 }
@@ -33,18 +39,35 @@ Flags:
   -Repo <owner/name> GitHub repository. Defaults to the built-in one.
   -Ref <git-ref>     Source revision metadata. Defaults to HEAD.
   -Commit <sha>      Exact commit to update to.
+  -Agents <list>     Comma-separated adapters to opt into on this update, in
+                     addition to any already detected: claude,cursor,codex,
+                     copilot,gemini,aider. Lets an existing installation pick
+                     up a newly supported adapter without a full reinstall.
   -Force             Overwrite locally edited managed files after confirmation.
   -DryRun            Show what would be done without making changes.
+  -Rollback           Restore the most recent backup run (.workflow/backups/<ts>/)
+                      over the current files.
+  -RollbackName <run> Restore a specific backup run by its timestamp directory
+                      name (e.g. 20260825T120000Z). Implies -Rollback.
+
+Backups: every run that overwrites or removes a managed file first copies the
+original into .workflow/backups/<UTC-timestamp>/<relative-path>. Only the 5
+most recent backup runs are retained; older ones are pruned automatically.
 '@ | Write-Host
     exit 0
 }
+
+if ($RollbackName) { $Rollback = $true }
 
 $script:TARGET = $Target
 $script:REPO = $Repo
 $script:REF = $Ref
 $script:COMMIT = $Commit
+$script:AGENTS = $Agents
 $script:DRY_RUN = [bool]$DryRun
 $script:FORCE = [bool]$Force
+$script:ROLLBACK = [bool]$Rollback
+$script:ROLLBACK_NAME = $RollbackName
 $script:RUNNER_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:TMP_ROOT = Join-Path ([System.IO.Path]::GetTempPath()) ('aaw-runner-' + [guid]::NewGuid().ToString('N'))
 
@@ -59,8 +82,11 @@ function Join-AawPathEarly {
 
 $script:STATE_FILE = Join-AawPathEarly $Target '.workflow/state.yml'
 $script:BACKUP_ROOT = Join-AawPathEarly $Target '.workflow/backups'
+$script:RUN_TIMESTAMP = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+$script:RUN_BACKUP_DIR = Join-Path $script:BACKUP_ROOT $script:RUN_TIMESTAMP
 $script:BACKED_UP_LIST_FILE = Join-Path $script:TMP_ROOT 'backed-up-files.txt'
 $script:APPLIED_MIGRATIONS_FILE = Join-Path $script:TMP_ROOT 'applied-migrations.txt'
+$script:NEW_MIGRATIONS_FILE = Join-Path $script:TMP_ROOT 'newly-applied-migrations.txt'
 $script:LEGACY_MODE = $false
 $script:STATE_REPO = ''
 $script:STATE_REF = ''
@@ -68,6 +94,56 @@ $script:OLD_SRC_ROOT = ''
 $script:OLD_TPL = ''
 
 . (Join-Path $script:RUNNER_ROOT 'lib/update-common.ps1')
+
+function Test-AawRequestedAgent {
+    param([string]$Name)
+    if (-not $script:AGENTS) { return $false }
+    return ((',' + $script:AGENTS + ',') -like "*,$Name,*")
+}
+
+function Invoke-AawRollback {
+    if (-not (Test-Path -LiteralPath $script:TARGET)) { Throw-Aaw "target dir does not exist: $script:TARGET" }
+    if (-not (Test-Path -LiteralPath $script:BACKUP_ROOT)) { Throw-Aaw "no backups available to roll back: $($script:BACKUP_ROOT) missing" }
+
+    if ($script:ROLLBACK_NAME) {
+        if ($script:ROLLBACK_NAME -notmatch '^[0-9]{8}T[0-9]{6}Z$') {
+            Throw-Aaw '-RollbackName must be a backup run timestamp like 20260825T120000Z'
+        }
+        $chosen = $script:ROLLBACK_NAME
+    } else {
+        $runDirs = Get-ChildItem -LiteralPath $script:BACKUP_ROOT -Directory |
+            Where-Object { $_.Name -match '^[0-9]{8}T[0-9]{6}Z$' } |
+            Sort-Object Name -Descending
+        if ($runDirs.Count -lt 1) { Throw-Aaw "no backup runs found under $($script:BACKUP_ROOT)" }
+        $chosen = $runDirs[0].Name
+    }
+
+    $chosenDir = Join-Path $script:BACKUP_ROOT $chosen
+    if (-not (Test-Path -LiteralPath $chosenDir)) { Throw-Aaw "backup run not found: $chosenDir" }
+
+    $files = Get-ChildItem -LiteralPath $chosenDir -Recurse -File
+    if ($files.Count -lt 1) { Throw-Aaw "backup run is empty; nothing to restore: $chosenDir" }
+
+    Write-AawLog "rolling back using backup run: $chosen ($($files.Count) file(s))"
+    if ($script:DRY_RUN) { Write-AawLog 'DRY RUN - no files will be restored' }
+
+    foreach ($file in $files) {
+        $rel = $file.FullName.Substring($chosenDir.Length).TrimStart('\', '/')
+        $dest = Join-AawPathEarly $script:TARGET $rel
+        if ($script:DRY_RUN) {
+            Write-AawLog "would restore: $dest"
+            continue
+        }
+        Ensure-AawParentDirectory $dest
+        Copy-Item -LiteralPath $file.FullName -Destination $dest -Force
+        Write-AawLog "restored: $dest"
+    }
+
+    if (-not $script:DRY_RUN) {
+        Write-AawLog "rollback complete using backup run: $chosen"
+        Write-AawLog 'note: this restores files captured in that run, including .workflow/state.yml if it was backed up, which reverts the applied-migrations ledger and installed_ref to their prior values.'
+    }
+}
 
 function Update-AawTemplateFile {
     param(
@@ -158,18 +234,43 @@ function Write-AawStateFile {
         Write-AawLog "would write install state: $stateFile"
         return
     }
-    if (Test-Path -LiteralPath $stateFile) { Backup-AawFile '.workflow/state.yml' }
+
+    # Preserve up to the 4 most recent prior history entries (single-line
+    # flow mappings) so this run's entry keeps a bounded rolling window of 5.
+    $oldHistoryLines = @()
+    $fromRef = if ($script:STATE_REF) { $script:STATE_REF } else { 'unknown' }
+    if (Test-Path -LiteralPath $stateFile) {
+        $oldHistoryLines = @(Get-Content -LiteralPath $stateFile | Where-Object { $_ -match '^    - \{' } | Select-Object -Last 4)
+        Backup-AawFile '.workflow/state.yml'
+    }
+
+    $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+    $backupDirField = 'null'
+    if (Test-Path -LiteralPath $script:RUN_BACKUP_DIR) {
+        $backupDirField = "`".workflow/backups/$($script:RUN_TIMESTAMP)`""
+    }
+
+    $migrationsAppliedField = '[]'
+    $newMigrations = @()
+    if (Test-Path -LiteralPath $script:NEW_MIGRATIONS_FILE) { $newMigrations = @(Get-Content -LiteralPath $script:NEW_MIGRATIONS_FILE | Where-Object { $_ }) }
+    if ($newMigrations.Count -gt 0) {
+        $migrationsAppliedField = '[' + ($newMigrations -join ', ') + ']'
+    }
 
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('install:')
     $lines.Add('  tool: hekate')
     $lines.Add("  installed_repo: $($script:REPO)")
     $lines.Add("  installed_ref: $installRef")
-    $lines.Add('  installed_at: ' + (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
+    $lines.Add('  installed_at: ' + $timestamp)
     $lines.Add('  adapters:')
     if (Test-AawProjectHasClaudeAdapter) { $lines.Add('    - claude') }
     if (Test-AawProjectHasCursorAdapter) { $lines.Add('    - cursor') }
     if (Test-AawProjectHasCodexAdapter) { $lines.Add('    - codex') }
+    if (Test-AawProjectHasCopilotAdapter) { $lines.Add('    - copilot') }
+    if (Test-AawProjectHasGeminiAdapter) { $lines.Add('    - gemini') }
+    if (Test-AawProjectHasAiderAdapter) { $lines.Add('    - aider') }
     $lines.Add('schema:')
     $lines.Add('  state_version: 2')
     $applied = @()
@@ -180,6 +281,11 @@ function Write-AawStateFile {
     } else {
         $lines.Add('  applied_migrations: []')
     }
+
+    $lines.Add('  history:')
+    foreach ($historyLine in $oldHistoryLines) { $lines.Add($historyLine) }
+    $lines.Add("    - {ran_at: `"$timestamp`", from_ref: `"$fromRef`", to_ref: `"$installRef`", backup_dir: $backupDirField, migrations_applied: $migrationsAppliedField}")
+
     [System.IO.File]::WriteAllLines($stateFile, $lines.ToArray(), [System.Text.Encoding]::UTF8)
     Write-AawLog "updated: $stateFile"
 }
@@ -209,6 +315,7 @@ function Invoke-AawMigrations {
         Write-AawLog "running migration: $migrationId"
         & $migration.FullName
         Add-AawUniqueLine $script:APPLIED_MIGRATIONS_FILE $migrationId
+        Add-AawUniqueLine $script:NEW_MIGRATIONS_FILE $migrationId
         Write-AawLog "applied migration: $migrationId"
     }
 }
@@ -217,8 +324,15 @@ try {
     New-Item -ItemType Directory -Force -Path $script:TMP_ROOT | Out-Null
     New-Item -ItemType File -Force -Path $script:BACKED_UP_LIST_FILE | Out-Null
     New-Item -ItemType File -Force -Path $script:APPLIED_MIGRATIONS_FILE | Out-Null
+    New-Item -ItemType File -Force -Path $script:NEW_MIGRATIONS_FILE | Out-Null
 
     if (-not (Test-Path -LiteralPath $script:TARGET)) { Throw-Aaw "target dir does not exist: $script:TARGET" }
+
+    if ($script:ROLLBACK) {
+        Invoke-AawRollback
+        exit 0
+    }
+
     if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET 'AGENTS.md'))) { Throw-Aaw "target does not look like a workflow installation: $script:TARGET/AGENTS.md missing" }
     if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/workflow.yml'))) { Throw-Aaw 'target does not look like a workflow installation: .workflow/workflow.yml missing' }
     if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/presets.yml'))) { Throw-Aaw 'target does not look like a workflow installation: .workflow/presets.yml missing' }
@@ -256,6 +370,9 @@ try {
     Update-AawTemplateFile 'AGENTS.md' 'AGENTS.md'
     Update-AawRootReadme
     Update-AawTemplateFile '.workflow/bootstrap.md' '.workflow/bootstrap.md'
+    Update-AawTemplateFile '.workflow/delegation.md' '.workflow/delegation.md'
+    Update-AawTemplateFile '.workflow/subagents.md' '.workflow/subagents.md'
+    Update-AawTemplateFile '.workflow/history-format.md' '.workflow/history-format.md'
     Update-AawTemplateFile '.workflow/README.md' '.workflow/README.md'
     Update-AawTemplateFile '.workflow/orchestration.yml' '.workflow/orchestration.yml'
     Update-AawTemplateFile '.workflow/bin/hekate-agent' '.workflow/bin/hekate-agent'
@@ -274,11 +391,23 @@ try {
     if (Test-AawProjectHasCursorAdapter) {
         Update-AawTemplateFile '.cursor/rules/workflow.mdc' 'adapters/cursor/.cursor/rules/workflow.mdc'
     }
-    if ((Test-AawProjectHasCursorAdapter) -or (Test-AawProjectHasCodexAdapter)) {
+    if ((Test-AawProjectHasCopilotAdapter) -or (Test-AawRequestedAgent 'copilot')) {
+        Update-AawTemplateFile '.github/copilot-instructions.md' 'adapters/copilot/.github/copilot-instructions.md'
+    }
+    if ((Test-AawProjectHasGeminiAdapter) -or (Test-AawRequestedAgent 'gemini')) {
+        Update-AawTemplateFile 'GEMINI.md' 'adapters/gemini/GEMINI.md'
+    }
+    if ((Test-AawProjectHasAiderAdapter) -or (Test-AawRequestedAgent 'aider')) {
+        Update-AawTemplateFile '.aider.conf.yml' 'adapters/aider/.aider.conf.yml'
+    }
+    if ((Test-AawProjectHasCursorAdapter) -or (Test-AawProjectHasCodexAdapter) `
+        -or (Test-AawProjectHasCopilotAdapter) -or (Test-AawProjectHasGeminiAdapter) -or (Test-AawProjectHasAiderAdapter) `
+        -or (Test-AawRequestedAgent 'copilot') -or (Test-AawRequestedAgent 'gemini') -or (Test-AawRequestedAgent 'aider')) {
         Update-AawSkills '.agents/skills'
     }
 
     Write-AawStateFile
+    Remove-AawOldBackupRuns 5
 
 @'
 
@@ -289,7 +418,8 @@ try {
    - Pending migrations from the downloaded snapshot were applied in order.
    - Existing .workflow/*.yml values were preserved; migrations only changed known managed paths.
    - Local edits in template-managed files were left in place and, if needed, mirrored to <file>.new.
-   - Backups of changed files are stored in .workflow/backups/.
+   - Backups of changed files are stored in .workflow/backups/<UTC-timestamp>/ (last 5 runs kept).
+   - Use -Rollback (optionally -RollbackName <timestamp>) to restore a backup run.
 ---------------------------------------------------------
 '@ | Write-Host
 } finally {

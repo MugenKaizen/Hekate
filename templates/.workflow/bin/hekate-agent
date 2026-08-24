@@ -1,5 +1,26 @@
 #!/usr/bin/env sh
 # Hekate cross-harness job runner. No daemon, MCP server, eval, or dependencies.
+#
+# Canonical job-directory layout (must match hekate-agent.ps1 exactly; a job
+# created by one implementation must be fully readable by the other):
+#   status        - queued | running | completed | failed | stopped | orphaned
+#   profile       - resolved profile name, or "none"
+#   harness       - resolved harness name
+#   model         - resolved model token
+#   effort        - resolved effort token
+#   cwd           - absolute working directory for the job
+#   task.md       - the task/prompt text delivered to the harness
+#   command.txt   - the resolved command line, for debugging
+#   stdout.log    - harness stdout (streamed incrementally where possible)
+#   stderr.log    - harness stderr (streamed incrementally where possible)
+#   worker-pid    - PID of the detached worker process (this script, __worker)
+#   child-pid     - PID of the harness child process launched by the worker
+#   worker-token  - durable identity marker ("<pid>:<start-time>") used to
+#                   verify worker-pid ownership before signaling it
+#   started-at    - UTC timestamp the worker began running the harness
+#   finished-at   - UTC timestamp the worker observed the harness exit
+#   exit-code     - the harness process's exit code
+#   launcher-pid  - PID of the `nohup ... &` launcher (background runs only)
 set -eu
 
 SELF="$0"
@@ -54,6 +75,27 @@ unquote() {
   printf '%s\n' "$1" | awk '{ v=$0; sub(/^[[:space:]]+/,"",v); sub(/[[:space:]]+$/,"",v); if ((substr(v,1,1)=="\"" && substr(v,length(v),1)=="\"") || (substr(v,1,1)=="\047" && substr(v,length(v),1)=="\047")) v=substr(v,2,length(v)-2); print v }'
 }
 
+# check_no_tab_indent: refuse tab-indented YAML with a clear, immediate error
+# instead of letting the indentation-sensitive parser below silently return
+# nothing for lines it cannot classify. Must be called at top level (not
+# inside a command substitution) so `die` actually terminates the script.
+check_no_tab_indent() {
+  f="$1"
+  [ -f "$f" ] || return 0
+  line="$(awk '/^\t/ { print NR; exit } /^ *\t/ { print NR; exit }' "$f")"
+  [ -z "$line" ] || die "tab-indented line $line in $f is not supported; use spaces for indentation"
+}
+
+# Shared awk parser core. Indentation depth is measured relative to the
+# section/item it is nested under (whatever width the file actually uses),
+# rather than a hardcoded column count, so 2-space, 4-space, or otherwise
+# consistently-indented YAML all parse correctly. A found key is reported as
+# "F:<value>" (value may be empty); an absent key prints nothing, so callers
+# can distinguish "key absent" from "key present but empty".
+_indent_awk_prelude='
+  function indent_of(line,   n) { n = match(line, /[^ ]/); return (n ? n - 1 : length(line)) }
+'
+
 top_value() {
   file="$1" key="$2"
   [ -f "$file" ] || return 0
@@ -61,31 +103,103 @@ top_value() {
   [ -z "$raw" ] || unquote "$raw"
 }
 
-nested_value() {
+_nested_raw() {
   file="$1" section="$2" item="$3" key="$4"
   [ -f "$file" ] || return 0
-  raw="$(awk -v section="$section" -v item="$item" -v key="$key" '
-    { trimmed=$0; sub(/[[:space:]]+$/, "", trimmed) }
-    trimmed == section ":" { s=1; next }
-    s && $0 ~ "^[^[:space:]]" { exit }
-    s && trimmed == "  " item ":" { i=1; next }
-    i && $0 ~ "^  [^[:space:]][^:]*:[[:space:]]*$" { exit }
-    i && $0 ~ "^    " key ":[[:space:]]*" { v=$0; sub("^    " key ":[[:space:]]*","",v); sub(/[[:space:]]+#.*/,"",v); print v; exit }
-  ' "$file")"
-  [ -z "$raw" ] || unquote "$raw"
+  awk -v section="$section" -v item="$item" -v key="$key" "$_indent_awk_prelude"'
+    BEGIN { state = 0; item_indent = ""; key_indent = "" }
+    {
+      raw = $0
+      if (raw ~ /^[[:space:]]*$/ || raw ~ /^[[:space:]]*#/) next
+      ind = indent_of(raw)
+      content = raw; sub(/^ */, "", content)
+      if (state == 0) {
+        if (ind == 0 && content == section ":") state = 1
+        next
+      }
+      # Leaving the target item scope (sibling item, or dedent to a
+      # top-level key handled just below) falls back to item-scanning for
+      # this same line, rather than abandoning the whole section outright.
+      if (state == 2 && ind <= item_indent) { state = 1; item_indent = ""; key_indent = "" }
+      if (state == 1) {
+        if (ind == 0) { state = 0; next }
+        if (item_indent == "" || ind == item_indent) {
+          if (content == item ":") { item_indent = ind; state = 2 }
+          else { item_indent = ind }
+        }
+        next
+      }
+      if (state == 2) {
+        if (key_indent == "") key_indent = ind
+        if (ind == key_indent && content ~ "^" key ":") {
+          v = content
+          sub("^" key ":[[:space:]]*", "", v)
+          sub(/[[:space:]]+#.*/, "", v)
+          print "F:" v
+          exit
+        }
+        next
+      }
+    }
+  ' "$file"
+}
+
+nested_value() {
+  raw="$(_nested_raw "$@")"
+  case "$raw" in
+    F:*) unquote "${raw#F:}" ;;
+    *) printf '\n' ;;
+  esac
+}
+
+nested_present() {
+  raw="$(_nested_raw "$@")"
+  case "$raw" in F:*) return 0 ;; *) return 1 ;; esac
 }
 
 harness_list() {
   file="$1" item="$2" list_key="$3"
-  awk -v item="$item" -v list_key="$list_key" '
-    { trimmed=$0; sub(/[[:space:]]+$/, "", trimmed) }
-    trimmed == "harnesses:" { h=1; next }
-    h && /^[^[:space:]]/ { exit }
-    h && trimmed == "  " item ":" { i=1; next }
-    i && /^  [^[:space:]][^:]*:[[:space:]]*$/ { exit }
-    i && $0 ~ "^    " list_key ":[[:space:]]*$" { a=1; next }
-    a && /^      -[[:space:]]*/ { v=$0; sub(/^      -[[:space:]]*/,"",v); if ((substr(v,1,1)=="\"" && substr(v,length(v),1)=="\"") || (substr(v,1,1)=="\047" && substr(v,length(v),1)=="\047")) v=substr(v,2,length(v)-2); print v; next }
-    a && $0 !~ /^      / { exit }
+  [ -f "$file" ] || return 0
+  awk -v item="$item" -v list_key="$list_key" "$_indent_awk_prelude"'
+    BEGIN { state = 0; item_indent = ""; key_indent = ""; list_indent = "" }
+    {
+      raw = $0
+      if (raw ~ /^[[:space:]]*$/ || raw ~ /^[[:space:]]*#/) next
+      ind = indent_of(raw)
+      content = raw; sub(/^ */, "", content)
+      if (state == 0) {
+        if (ind == 0 && content == "harnesses:") state = 1
+        next
+      }
+      # Cascade dedents through as many scopes as needed on this one line
+      # (e.g. a list ending at the same moment its owning item ends).
+      if (state == 3 && ind <= key_indent) { state = 2; key_indent = ""; list_indent = "" }
+      if (state == 2 && ind <= item_indent) { state = 1; item_indent = ""; key_indent = "" }
+      if (state == 1) {
+        if (ind == 0) { state = 0; next }
+        if (item_indent == "" || ind == item_indent) {
+          if (content == item ":") { item_indent = ind; state = 2 }
+          else { item_indent = ind }
+        }
+        next
+      }
+      if (state == 2) {
+        if (key_indent == "" || ind == key_indent) {
+          if (content ~ "^" list_key ":[[:space:]]*$") { key_indent = ind; state = 3; list_indent = "" }
+          else { key_indent = ind }
+        }
+        next
+      }
+      if (state == 3) {
+        if (list_indent == "") list_indent = ind
+        if (ind == list_indent && content ~ /^-[[:space:]]*/) {
+          v = content; sub(/^-[[:space:]]*/, "", v)
+          if ((substr(v,1,1)=="\"" && substr(v,length(v),1)=="\"") || (substr(v,1,1)=="\047" && substr(v,length(v),1)=="\047")) v=substr(v,2,length(v)-2)
+          print v
+        }
+        next
+      }
+    }
   ' "$file"
 }
 
@@ -94,7 +208,26 @@ harness_args() { harness_list "$1" "$2" args; }
 section_names() {
   file="$1" section="$2"
   [ -f "$file" ] || return 0
-  awk -v section="$section" '$0 ~ "^" section ":[[:space:]]*$"{s=1;next} s&&/^[^[:space:]]/{exit} s&&/^  [A-Za-z0-9_.-]+:[[:space:]]*$/{v=$0;sub(/^  /,"",v);sub(/:.*/,"",v);print v}' "$file"
+  awk -v section="$section" "$_indent_awk_prelude"'
+    BEGIN { state = 0; item_indent = "" }
+    {
+      raw = $0
+      if (raw ~ /^[[:space:]]*$/ || raw ~ /^[[:space:]]*#/) next
+      ind = indent_of(raw)
+      content = raw; sub(/^ */, "", content)
+      if (state == 0) {
+        if (ind == 0 && content == section ":") state = 1
+        next
+      }
+      if (state == 1) {
+        if (ind == 0) { state = 0; next }
+        if (item_indent == "") item_indent = ind
+        if (ind == item_indent && content ~ /^[A-Za-z0-9_.-]+:[[:space:]]*$/) {
+          v = content; sub(/:[[:space:]]*$/, "", v); print v
+        }
+      }
+    }
+  ' "$file"
 }
 
 harness_names() { section_names "$CONFIG" harnesses; }
@@ -119,7 +252,11 @@ valid_profile_id() {
   valid_id "$1" || return 1
   case "$1" in none|null) return 1 ;; *) return 0 ;; esac
 }
-require_harness() { valid_id "$1" || die "invalid harness name"; nested_value "$CONFIG" harnesses "$1" command | grep -q . || die "unknown harness: $1"; }
+require_harness() {
+  valid_id "$1" || die "invalid harness name"
+  nested_present "$CONFIG" harnesses "$1" command || die "unknown harness: $1"
+  nested_value "$CONFIG" harnesses "$1" command | grep -q . || die "harness $1 has an empty command"
+}
 
 local_or_base_top() {
   key="$1"; v="$(top_value "$LOCAL_CONFIG" "$key")"; [ -n "$v" ] || v="$(top_value "$CONFIG" "$key")"; printf '%s\n' "$v"
@@ -137,9 +274,16 @@ profile_value() {
   printf '%s\n' "$v"
 }
 
+profile_present() {
+  profile="$1"
+  nested_present "$LOCAL_CONFIG" profiles "$profile" harness && return 0
+  nested_present "$CONFIG" profiles "$profile" harness
+}
+
 require_profile() {
   valid_profile_id "$1" || die "invalid or reserved profile name: $1"
-  profile_value "$1" harness | grep -q . || die "unknown profile: $1"
+  profile_present "$1" || die "unknown profile: $1"
+  profile_value "$1" harness | grep -q . || die "profile $1 has an empty harness"
 }
 
 default_value() {
@@ -212,14 +356,22 @@ invoke_job() {
   esac
 }
 
+worker_start_time() {
+  pid="$1"
+  command -v ps >/dev/null 2>&1 || return 1
+  ps -p "$pid" -o lstart= 2>/dev/null | awk '{ $1=$1; print }'
+}
+
 worker() {
   run="$1"; atomic_write "$run/status" running; atomic_write "$run/worker-pid" "$$"; atomic_write "$run/started-at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  token_time="$(worker_start_time "$$" || true)"
+  atomic_write "$run/worker-token" "$$:$token_time"
   child=""
   on_term() { [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true; atomic_write "$run/status" stopped; exit 143; }
   trap on_term INT TERM HUP
   set +e
   (cd "$(read_field "$run" cwd)" && invoke_job "$run") > "$run/stdout.log" 2> "$run/stderr.log" &
-  child=$!; atomic_write "$run/pid" "$child"; wait "$child"; code=$?
+  child=$!; atomic_write "$run/child-pid" "$child"; wait "$child"; code=$?
   set -e
   atomic_write "$run/exit-code" "$code"; atomic_write "$run/finished-at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [ "$code" -eq 0 ]; then atomic_write "$run/status" completed; else atomic_write "$run/status" failed; fi
@@ -261,9 +413,36 @@ show_config() {
 
 job_path() { valid_id "$1" || die "invalid job id"; p="$(jobs_dir)/$1"; [ -d "$p" ] || die "unknown job: $1"; printf '%s\n' "$p"; }
 
+# pid_is_worker verifies that $pid is still the same process that was
+# recorded as the worker for job $run, guarding against PID reuse (a dead
+# worker's PID being recycled by an unrelated process before we get to
+# signal it). Primary check: compare the process's current start time
+# against the "worker-token" recorded when the worker started (durable,
+# independent of argv/command-line contents). Fallback, only used when the
+# primary check is unavailable (no ps/lstart support, or a job directory
+# created before worker-token existed): substring-match the command line, as
+# before. If neither check can positively establish ownership, refuse.
 pid_is_worker() {
   pid="$1" run="$2"
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  token="$(read_field "$run" worker-token)"
+  if [ -n "$token" ]; then
+    token_pid="${token%%:*}"
+    token_time="${token#*:}"
+    if [ "$token_pid" = "$pid" ] && [ -n "$token_time" ]; then
+      current_time="$(worker_start_time "$pid" || true)"
+      if [ -n "$current_time" ]; then
+        [ "$current_time" = "$token_time" ] && return 0 || return 1
+      fi
+    elif [ "$token_pid" = "$pid" ]; then
+      # token exists for this pid but we could not capture a start time at
+      # worker start (no ps/lstart support) — fall through to the heuristic.
+      :
+    else
+      # token belongs to a different pid than the one we were asked about.
+      return 1
+    fi
+  fi
   command -v ps >/dev/null 2>&1 || return 1
   line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
   case "$line" in *"hekate-agent"*"__worker"*"$run"*) return 0 ;; *) return 1 ;; esac
@@ -343,6 +522,9 @@ run_command() {
     atomic_write "$run/launcher-pid" "$!"; printf '%s\n' "$id"
   fi
 }
+
+check_no_tab_indent "$CONFIG"
+check_no_tab_indent "$LOCAL_CONFIG"
 
 cmd="${1:-help}"; [ "$#" -eq 0 ] || shift
 case "$cmd" in
