@@ -124,6 +124,21 @@ function Test-AawProjectHasCodexAdapter {
     Test-AawStateHasAdapter 'codex' $script:STATE_FILE
 }
 
+function Test-AawProjectHasCopilotAdapter {
+    (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.github/copilot-instructions.md')) -or
+    (Test-AawStateHasAdapter 'copilot' $script:STATE_FILE)
+}
+
+function Test-AawProjectHasGeminiAdapter {
+    (Test-Path -LiteralPath (Join-AawPath $script:TARGET 'GEMINI.md')) -or
+    (Test-AawStateHasAdapter 'gemini' $script:STATE_FILE)
+}
+
+function Test-AawProjectHasAiderAdapter {
+    (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.aider.conf.yml')) -or
+    (Test-AawStateHasAdapter 'aider' $script:STATE_FILE)
+}
+
 function Test-AawAlreadyBackedUp {
     param([string]$RelativePath)
     if (-not $script:BACKED_UP_LIST_FILE -or -not (Test-Path -LiteralPath $script:BACKED_UP_LIST_FILE)) { return $false }
@@ -144,7 +159,15 @@ function Backup-AawFile {
     if (-not (Test-Path -LiteralPath $src)) { return }
     if (Test-AawAlreadyBackedUp $RelativePath) { return }
 
-    $dst = Join-AawPath $script:BACKUP_ROOT ($RelativePath + '.bak')
+    # Prefer the current run's timestamped backup directory
+    # (.workflow/backups/<UTC-timestamp>/<relative path>) when the caller has
+    # set one up via $script:RUN_BACKUP_DIR. Falls back to the flat legacy
+    # layout (.workflow/backups/<relative path>) for standalone invocations.
+    $backupRootForRun = $script:BACKUP_ROOT
+    if ((Get-Variable -Name RUN_BACKUP_DIR -Scope Script -ErrorAction SilentlyContinue) -and $script:RUN_BACKUP_DIR) {
+        $backupRootForRun = $script:RUN_BACKUP_DIR
+    }
+    $dst = Join-AawPath $backupRootForRun $RelativePath
     if ($script:DRY_RUN) {
         Write-AawLog "would back up: $src -> $dst"
         Add-AawBackedUpMark $RelativePath
@@ -152,9 +175,25 @@ function Backup-AawFile {
     }
 
     Ensure-AawParentDirectory $dst
-    Copy-Item -LiteralPath $src -Destination $dst -Force
+    Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
     Add-AawBackedUpMark $RelativePath
     Write-AawLog "backed up: $dst"
+}
+
+function Remove-AawOldBackupRuns {
+    param([int]$Keep = 5)
+    if (-not (Test-Path -LiteralPath $script:BACKUP_ROOT)) { return }
+    if ($script:DRY_RUN) { return }
+
+    $runDirs = Get-ChildItem -LiteralPath $script:BACKUP_ROOT -Directory |
+        Where-Object { $_.Name -match '^[0-9]{8}T[0-9]{6}Z$' } |
+        Sort-Object Name -Descending
+    if ($runDirs.Count -le $Keep) { return }
+
+    foreach ($dir in ($runDirs | Select-Object -Skip $Keep)) {
+        Remove-Item -LiteralPath $dir.FullName -Recurse -Force
+        Write-AawLog "pruned old backup run: $($dir.FullName)"
+    }
 }
 
 function Copy-AawFile {

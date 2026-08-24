@@ -6,8 +6,23 @@
 #   --repo=<owner/name> GitHub repository. Defaults to the built-in one.
 #   --ref=<git-ref>     Source revision metadata. Defaults to HEAD.
 #   --commit=<sha>      Exact commit to update to.
+#   --agents=<list>     Comma-separated adapters to opt into on this update, in
+#                       addition to any already detected in the project:
+#                       claude,cursor,codex,copilot,gemini,aider. Lets an
+#                       existing installation pick up a newly supported
+#                       adapter without a full reinstall.
 #   --force             Overwrite locally edited managed files after confirmation.
 #   --dry-run           Show what would be done without making changes.
+#   --rollback           Restore the most recent backup run (.workflow/backups/<ts>/)
+#                        over the current files. Refuses to act if no backup
+#                        runs exist or the chosen run is empty.
+#   --rollback=<run>     Restore a specific backup run by its timestamp
+#                        directory name (e.g. 20260825T120000Z).
+#
+# Backups: every run that overwrites or removes a managed file first copies
+# the original into .workflow/backups/<UTC-timestamp>/<relative-path>. Only
+# the 5 most recent backup runs are retained; older ones are pruned
+# automatically. Use --rollback to restore the most recent (or a named) run.
 
 set -eu
 
@@ -15,8 +30,11 @@ TARGET="$(pwd)"
 REPO="${AAW_REPO:-MugenKaizen/Hekate}"
 REF="HEAD"
 COMMIT=""
+AGENTS=""
 DRY_RUN=0
 FORCE=0
+ROLLBACK=0
+ROLLBACK_NAME=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -24,10 +42,13 @@ for arg in "$@"; do
     --repo=*)   REPO="${arg#--repo=}" ;;
     --ref=*)    REF="${arg#--ref=}" ;;
     --commit=*) COMMIT="${arg#--commit=}" ;;
+    --agents=*) AGENTS="${arg#--agents=}" ;;
     --dry-run)  DRY_RUN=1 ;;
     --force)    FORCE=1 ;;
+    --rollback=*) ROLLBACK=1; ROLLBACK_NAME="${arg#--rollback=}" ;;
+    --rollback) ROLLBACK=1 ;;
     -h|--help)
-      sed -n '2,10p' "$0"
+      sed -n '2,21p' "$0"
       exit 0
       ;;
     *)
@@ -41,8 +62,11 @@ RUNNER_ROOT="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 TMP_ROOT="$(mktemp -d)"
 STATE_FILE="$TARGET/.workflow/state.yml"
 BACKUP_ROOT="$TARGET/.workflow/backups"
+RUN_TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
+RUN_BACKUP_DIR="$BACKUP_ROOT/$RUN_TIMESTAMP"
 BACKED_UP_LIST_FILE="$TMP_ROOT/backed-up-files.txt"
 APPLIED_MIGRATIONS_FILE="$TMP_ROOT/applied-migrations.txt"
+NEW_MIGRATIONS_FILE="$TMP_ROOT/newly-applied-migrations.txt"
 LEGACY_MODE=0
 STATE_REPO=""
 STATE_REF=""
@@ -55,6 +79,57 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 . "$RUNNER_ROOT/lib/update-common.sh"
+
+has_requested_agent() {
+  [ -n "$AGENTS" ] || return 1
+  case ",$AGENTS," in
+    *",$1,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+do_rollback() {
+  [ -d "$TARGET" ] || die "target dir does not exist: $TARGET"
+  [ -d "$BACKUP_ROOT" ] || die "no backups available to roll back: $BACKUP_ROOT missing"
+
+  if [ -n "$ROLLBACK_NAME" ]; then
+    printf '%s' "$ROLLBACK_NAME" | grep -Eq '^[0-9]{8}T[0-9]{6}Z$' \
+      || die "--rollback name must be a backup run timestamp like 20260825T120000Z"
+    chosen="$ROLLBACK_NAME"
+  else
+    # shellcheck disable=SC2012
+    chosen="$(ls -1 "$BACKUP_ROOT" 2>/dev/null | grep -E '^[0-9]{8}T[0-9]{6}Z$' | sort -r | head -n1)"
+  fi
+  [ -n "$chosen" ] || die "no backup runs found under $BACKUP_ROOT"
+
+  chosen_dir="$BACKUP_ROOT/$chosen"
+  [ -d "$chosen_dir" ] || die "backup run not found: $chosen_dir"
+
+  file_count="$(find "$chosen_dir" -type f | wc -l | tr -d ' ')"
+  [ "$file_count" -gt 0 ] || die "backup run is empty; nothing to restore: $chosen_dir"
+
+  log "rolling back using backup run: $chosen ($file_count file(s))"
+  [ "$DRY_RUN" -eq 1 ] && log "DRY RUN — no files will be restored"
+
+  find "$chosen_dir" -type f > "$TMP_ROOT/rollback-files.txt"
+  while IFS= read -r backed_up_file; do
+    [ -n "$backed_up_file" ] || continue
+    rel="${backed_up_file#"$chosen_dir"/}"
+    dest="$TARGET/$rel"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "would restore: $dest"
+      continue
+    fi
+    mkdir -p "$(dirname "$dest")"
+    cp -R "$backed_up_file" "$dest"
+    log "restored: $dest"
+  done < "$TMP_ROOT/rollback-files.txt"
+
+  if [ "$DRY_RUN" -eq 0 ]; then
+    log "rollback complete using backup run: $chosen"
+    log "note: this restores files captured in that run, including .workflow/state.yml if it was backed up, which reverts the applied-migrations ledger and installed_ref to their prior values."
+  fi
+}
 
 update_template_file() {
   target_rel="$1"
@@ -165,6 +240,10 @@ write_state_file() {
   has_claude=0
   has_cursor=0
   has_codex=0
+  has_copilot=0
+  has_gemini=0
+  has_aider=0
+  from_ref="${STATE_REF:-unknown}"
 
   if [ -n "$COMMIT" ]; then
     install_ref="$COMMIT"
@@ -175,7 +254,11 @@ write_state_file() {
     return 0
   fi
 
+  # Preserve up to the 4 most recent prior history entries (single-line flow
+  # mappings) so this run's entry keeps a bounded rolling window of 5.
+  old_history_lines=""
   if [ -f "$state_file" ]; then
+    old_history_lines="$(grep '^    - {' "$state_file" 2>/dev/null | tail -n 4 || true)"
     backup_file ".workflow/state.yml"
   fi
 
@@ -187,6 +270,26 @@ write_state_file() {
   fi
   if project_has_codex_adapter; then
     has_codex=1
+  fi
+  if project_has_copilot_adapter; then
+    has_copilot=1
+  fi
+  if project_has_gemini_adapter; then
+    has_gemini=1
+  fi
+  if project_has_aider_adapter; then
+    has_aider=1
+  fi
+
+  backup_dir_field="null"
+  if [ -d "$RUN_BACKUP_DIR" ]; then
+    backup_dir_field="\".workflow/backups/$RUN_TIMESTAMP\""
+  fi
+
+  migrations_applied_field="[]"
+  if [ -s "$NEW_MIGRATIONS_FILE" ]; then
+    migrations_applied_field="$(awk '{ printf "%s%s", sep, $0; sep = ", " } END { print "" }' "$NEW_MIGRATIONS_FILE")"
+    migrations_applied_field="[$migrations_applied_field]"
   fi
 
   mkdir -p "$(dirname "$state_file")"
@@ -207,6 +310,15 @@ write_state_file() {
     if [ "$has_codex" -eq 1 ]; then
       printf '    - codex\n'
     fi
+    if [ "$has_copilot" -eq 1 ]; then
+      printf '    - copilot\n'
+    fi
+    if [ "$has_gemini" -eq 1 ]; then
+      printf '    - gemini\n'
+    fi
+    if [ "$has_aider" -eq 1 ]; then
+      printf '    - aider\n'
+    fi
 
     printf 'schema:\n'
     printf '  state_version: 2\n'
@@ -219,6 +331,13 @@ write_state_file() {
     else
       printf '  applied_migrations: []\n'
     fi
+
+    printf '  history:\n'
+    if [ -n "$old_history_lines" ]; then
+      printf '%s\n' "$old_history_lines"
+    fi
+    printf '    - {ran_at: "%s", from_ref: "%s", to_ref: "%s", backup_dir: %s, migrations_applied: %s}\n' \
+      "$timestamp" "$from_ref" "$install_ref" "$backup_dir_field" "$migrations_applied_field"
   } > "$state_file"
 
   log "updated: $state_file"
@@ -250,18 +369,28 @@ run_migrations() {
     log "running migration: $migration_id"
     sh "$migration_script"
     append_unique_line "$APPLIED_MIGRATIONS_FILE" "$migration_id"
+    append_unique_line "$NEW_MIGRATIONS_FILE" "$migration_id"
     log "applied migration: $migration_id"
   done
 }
 
 [ -d "$TARGET" ] || die "target dir does not exist: $TARGET"
+
+export TARGET REPO REF COMMIT DRY_RUN FORCE AGENTS RUNNER_ROOT TMP_ROOT STATE_FILE BACKUP_ROOT \
+  RUN_TIMESTAMP RUN_BACKUP_DIR BACKED_UP_LIST_FILE APPLIED_MIGRATIONS_FILE NEW_MIGRATIONS_FILE
+: > "$BACKED_UP_LIST_FILE"
+: > "$NEW_MIGRATIONS_FILE"
+
+if [ "$ROLLBACK" -eq 1 ]; then
+  do_rollback
+  exit 0
+fi
+
 [ -f "$TARGET/AGENTS.md" ] || die "target does not look like a workflow installation: $TARGET/AGENTS.md missing"
 [ -f "$TARGET/.workflow/workflow.yml" ] || die "target does not look like a workflow installation: .workflow/workflow.yml missing"
 [ -f "$TARGET/.workflow/presets.yml" ] || die "target does not look like a workflow installation: .workflow/presets.yml missing"
 [ -d "$RUNNER_ROOT/templates" ] || die "runner source is incomplete: templates/ missing"
 
-export TARGET REPO REF COMMIT DRY_RUN FORCE RUNNER_ROOT TMP_ROOT STATE_FILE BACKUP_ROOT BACKED_UP_LIST_FILE APPLIED_MIGRATIONS_FILE
-: > "$BACKED_UP_LIST_FILE"
 seed_applied_migrations_file "$STATE_FILE" "$APPLIED_MIGRATIONS_FILE"
 
 if [ -f "$STATE_FILE" ]; then
@@ -330,11 +459,26 @@ if project_has_cursor_adapter; then
   update_template_file ".cursor/rules/workflow.mdc" "adapters/cursor/.cursor/rules/workflow.mdc"
 fi
 
-if project_has_cursor_adapter || project_has_codex_adapter; then
+if project_has_copilot_adapter || has_requested_agent copilot; then
+  update_template_file ".github/copilot-instructions.md" "adapters/copilot/.github/copilot-instructions.md"
+fi
+
+if project_has_gemini_adapter || has_requested_agent gemini; then
+  update_template_file "GEMINI.md" "adapters/gemini/GEMINI.md"
+fi
+
+if project_has_aider_adapter || has_requested_agent aider; then
+  update_template_file ".aider.conf.yml" "adapters/aider/.aider.conf.yml"
+fi
+
+if project_has_cursor_adapter || project_has_codex_adapter \
+  || project_has_copilot_adapter || project_has_gemini_adapter || project_has_aider_adapter \
+  || has_requested_agent copilot || has_requested_agent gemini || has_requested_agent aider; then
   update_skills_to ".agents/skills"
 fi
 
 write_state_file
+prune_old_backups 5
 
 cat <<EOF
 
@@ -345,6 +489,7 @@ cat <<EOF
    - Pending migrations from the downloaded snapshot were applied in order.
    - Existing .workflow/*.yml values were preserved; migrations only changed known managed paths.
    - Local edits in template-managed files were left in place and, if needed, mirrored to <file>.new.
-   - Backups of changed files are stored in .workflow/backups/.
+   - Backups of changed files are stored in .workflow/backups/<UTC-timestamp>/ (last 5 runs kept).
+   - Use --rollback (optionally --rollback=<timestamp>) to restore a backup run.
 ─────────────────────────────────────────────────────────
 EOF

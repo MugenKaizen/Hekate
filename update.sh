@@ -12,8 +12,12 @@
 #   --repo=<owner/name> GitHub repository. Defaults to the built-in one.
 #   --ref=<git-ref>     Source revision metadata for local --source development.
 #   --commit=<sha>      Full 40-character commit SHA. Required for downloads.
+#   --agents=<list>     Comma-separated adapters to opt into on this update:
+#                       claude,cursor,codex,copilot,gemini,aider.
 #   --force             Overwrite locally edited managed files after confirmation.
 #   --dry-run           Show what would be done without making changes.
+#   --rollback[=<run>]  Restore the most recent (or a named) backup run instead
+#                       of updating. See update-runner.sh --help for details.
 
 set -eu
 
@@ -22,8 +26,11 @@ SOURCE=""
 REPO="${AAW_REPO:-MugenKaizen/Hekate}"
 REF=""
 COMMIT=""
+AGENTS=""
 DRY_RUN=0
 FORCE=0
+ROLLBACK=0
+ROLLBACK_NAME=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -32,10 +39,13 @@ for arg in "$@"; do
     --repo=*)   REPO="${arg#--repo=}" ;;
     --ref=*)    REF="${arg#--ref=}" ;;
     --commit=*) COMMIT="${arg#--commit=}" ;;
+    --agents=*) AGENTS="${arg#--agents=}" ;;
     --dry-run)  DRY_RUN=1 ;;
     --force)    FORCE=1 ;;
+    --rollback=*) ROLLBACK=1; ROLLBACK_NAME="${arg#--rollback=}" ;;
+    --rollback) ROLLBACK=1 ;;
     -h|--help)
-      sed -n '2,18p' "$0"
+      sed -n '2,21p' "$0"
       exit 0
       ;;
     *)
@@ -97,11 +107,21 @@ set -- "--target=$TARGET" "--repo=$REPO" "--ref=$REQUESTED_REV"
 if [ -n "$COMMIT" ]; then
   set -- "$@" "--commit=$COMMIT"
 fi
+if [ -n "$AGENTS" ]; then
+  set -- "$@" "--agents=$AGENTS"
+fi
 if [ "$DRY_RUN" -eq 1 ]; then
   set -- "$@" "--dry-run"
 fi
 if [ "$FORCE" -eq 1 ]; then
   set -- "$@" "--force"
+fi
+if [ "$ROLLBACK" -eq 1 ]; then
+  if [ -n "$ROLLBACK_NAME" ]; then
+    set -- "$@" "--rollback=$ROLLBACK_NAME"
+  else
+    set -- "$@" "--rollback"
+  fi
 fi
 
 log "starting update runner from snapshot"
