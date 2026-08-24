@@ -51,24 +51,43 @@ model questions. If enabled:
    review, and final verification. Delegated children are bounded
    executors/advisors and may not recursively delegate. The runner never infers
    complexity or architecture from prompt text.
-3. Ask whether routing should use one default harness or arbitrary named
+3. Explain the advisory-vs-writer split before asking about profiles: most
+   harnesses in `orchestration.yml` ship as an unsuffixed advisory/read-only
+   entry (research, review, propose — never edits files) and a
+   `<name>-write` twin that edits files unattended using that CLI's safest
+   available writer flag (never a bypass-everything flag). `pi` has no
+   permission gate at all and has no `-write` twin — plain `pi` already
+   writes unattended. A `-write` entry, and plain `pi`, must always run in a
+   dedicated git worktree, never the primary session's checkout. Write
+   access is a property of the task, not the project: a "review" or
+   "research" profile should route to an advisory entry; only a profile
+   meant to actually change files (e.g. "implement") should route to a
+   `-write` entry or `pi`.
+4. Ask whether routing should use one default harness or arbitrary named
    profiles. Offer `small`, `medium`, `complex`, and optional `small-deep` as a
    recommended complexity-oriented set, but do not require these names; teams
-   may instead define profiles by role, risk, cost, provider, or another policy.
-4. For one default, ask which `ok` harness to use, then its model and, only when
-   `supports_effort: true`, effort. Write `default_profile: null`.
-5. For named routing, ask for each profile's name and an `ok` harness. Model and
-   effort are optional: omitted values fall back to that harness's defaults.
-   Choose `default_profile` (often `medium` when using the recommended set).
-6. A valid pi example, only when those models are actually available, is:
+   may instead define profiles by role, risk, cost, provider, or another
+   policy — including an advisory/writer split such as `review`, `research`,
+   and `implement` (see step 3).
+5. For one default, ask which `ok` harness to use — including whether it
+   should be the advisory entry or its `-write` twin, given what the default
+   will be used for — then its model and, only when `supports_effort: true`,
+   effort. Write `default_profile: null`.
+6. For named routing, ask for each profile's name, whether it should write,
+   and an `ok` harness (an advisory entry, unless the profile is explicitly
+   for writing, in which case its `-write` twin or `pi`). Model and effort
+   are optional: omitted values fall back to that harness's defaults. Choose
+   `default_profile` — prefer an advisory profile as the default so an
+   unqualified run never writes unattended by accident.
+7. A valid pi example, only when those models are actually available, is:
    `small = openai-codex/gpt-5.6-terra + high`,
    `small-deep = openai-codex/gpt-5.6-terra + xhigh`,
    `medium = openai-codex/gpt-5.6-sol + medium`, and
    `complex = openai-codex/gpt-5.6-sol + high`. Do not install these as
-   universal defaults.
-7. Write `enabled: true`, `default_harness`, `default_profile`, profiles, and
+   universal defaults, and remind the user that plain `pi` always writes.
+8. Write `enabled: true`, `default_harness`, `default_profile`, profiles, and
    harness defaults to the committed orchestration config.
-8. Explain local selection without committed changes:
+9. Explain local selection without committed changes:
    `.workflow/bin/hekate-agent config use-profile <name>` or
    `.workflow/bin/hekate-agent config use <harness> --model <id> --effort <level>`.
 
