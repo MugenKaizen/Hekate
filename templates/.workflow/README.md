@@ -17,6 +17,9 @@ for how the agent works.
 | `session.local.yml` | Gitignored native-subagent policy for the current primary session: `off`, `ask`, or `auto` |
 | `bin/hekate-agent` | POSIX long-running job controller; PowerShell counterpart: `hekate-agent.ps1` |
 | `bootstrap.md` | Initialization procedure; read only when pre-flight fails or `/init-workflow` is requested |
+| `delegation.md` | Cross-harness delegation mechanics; read only when actually delegating to an external CLI harness |
+| `subagents.md` | Native-subagent policy detail; read only before the first native-subagent wave, or to change policy |
+| `history-format.md` | Task history file template and `events.jsonl` schema; read only during Plan/Verify |
 | `state.yml` | Installed workflow reference and applied migration IDs |
 | `history/` | Local task history (in `.gitignore`) |
 | `backups/` | Local one-file backups created before workflow updates |

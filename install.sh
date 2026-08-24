@@ -9,10 +9,18 @@
 #
 # Flags:
 #   --target=<path>     Root of the target project. Defaults to the current directory.
-#   --agents=<list>     Which adapters to lay down. Comma-separated: claude,cursor,codex.
+#   --agents=<list>     Which adapters to lay down. Comma-separated:
+#                       claude,cursor,codex,copilot,gemini,aider.
 #                       Defaults to all.
-#   --force             Overwrite existing files.
-#   --dry-run           Show what would be done without making changes.
+#   --force             Overwrite existing files. Any pre-existing managed file
+#                       is backed up first into .workflow/backups/<UTC-timestamp>/
+#                       (same convention update-runner.sh uses). Prints a warning
+#                       listing what will be overwritten and, on a TTY, asks for
+#                       confirmation before writing anything.
+#   --yes                Skip the --force confirmation prompt (required for
+#                       non-interactive/piped invocations combined with --force).
+#   --dry-run           Show what would be done (including what --force would
+#                       back up/overwrite) without making changes.
 #   --source=<path>     Local copy of the repository (for installer development).
 #   --commit=<sha>      Full 40-character commit SHA. Required for downloads.
 #   --ref=<git-ref>     Source revision metadata for local --source development.
@@ -22,8 +30,9 @@ set -eu
 
 # --- defaults ------------------------------------------------------------
 TARGET="$(pwd)"
-AGENTS="claude,cursor,codex"
+AGENTS="claude,cursor,codex,copilot,gemini,aider"
 FORCE=0
+YES=0
 DRY_RUN=0
 SOURCE=""
 REF=""
@@ -40,9 +49,10 @@ for arg in "$@"; do
     --commit=*)  COMMIT="${arg#--commit=}" ;;
     --repo=*)    REPO="${arg#--repo=}" ;;
     --force)     FORCE=1 ;;
+    --yes)       YES=1 ;;
     --dry-run)   DRY_RUN=1 ;;
     -h|--help)
-      sed -n '2,22p' "$0"
+      sed -n '2,27p' "$0"
       exit 0
       ;;
     *)
@@ -101,17 +111,38 @@ write_state_file() {
   log "updated: $state_file"
 }
 
+# PLAN_MODE=1 makes do_copy only record its destination path (for a
+# pre-flight --force overwrite/backup report) instead of touching anything.
+PLAN_MODE=0
+PLAN_FILE=""
+
 do_copy() {
-  # copy $1 -> $2 unless exists (or --force). Creates parent dirs.
+  # copy $1 -> $2 unless exists (or --force). Creates parent dirs. Existing
+  # files are backed up first when --force is in effect (see backup_file in
+  # lib/update-common.sh, sourced below — same convention update-runner.sh
+  # uses: .workflow/backups/<UTC-timestamp>/<relative-path>).
   src="$1"
   dst="$2"
+
+  if [ "$PLAN_MODE" -eq 1 ]; then
+    [ -z "$PLAN_FILE" ] || printf '%s\n' "$dst" >> "$PLAN_FILE"
+    return 0
+  fi
+
   if [ ! -e "$src" ]; then
     warn "source missing: $src"
     return 0
   fi
-  if [ -e "$dst" ] && [ "$FORCE" -eq 0 ]; then
-    log "skip (exists): $dst"
-    return 0
+  if [ -e "$dst" ]; then
+    if [ "$FORCE" -eq 0 ]; then
+      log "skip (exists): $dst"
+      return 0
+    fi
+    dst_rel="$dst"
+    case "$dst_rel" in
+      "$TARGET"/*) dst_rel="${dst_rel#"$TARGET"/}" ;;
+    esac
+    backup_file "$dst_rel"
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
     log "would copy: $src -> $dst"
@@ -167,9 +198,13 @@ copy_skills_to() {
 
 # --- acquire source ------------------------------------------------------
 CLEANUP_DIR=""
+INSTALL_TMP="$(mktemp -d)"
 cleanup() {
   if [ -n "$CLEANUP_DIR" ] && [ -d "$CLEANUP_DIR" ]; then
     rm -rf "$CLEANUP_DIR"
+  fi
+  if [ -n "$INSTALL_TMP" ] && [ -d "$INSTALL_TMP" ]; then
+    rm -rf "$INSTALL_TMP"
   fi
 }
 trap cleanup EXIT INT TERM
@@ -210,55 +245,130 @@ if [ -f "$TARGET/.workflow/workflow.yml" ] && [ "$FORCE" -eq 0 ]; then
   die "Hekate is already installed in $TARGET; use update.sh (or rerun with --force to replace managed files)"
 fi
 
+# lib/update-common.sh provides backup_file/prune_old_backups so --force
+# backs up pre-existing files the same way update-runner.sh does.
+. "$SRC_ROOT/lib/update-common.sh"
+
+BACKUP_ROOT="$TARGET/.workflow/backups"
+RUN_TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
+RUN_BACKUP_DIR="$BACKUP_ROOT/$RUN_TIMESTAMP"
+BACKED_UP_LIST_FILE="$INSTALL_TMP/backed-up-files.txt"
+PLAN_FILE="$INSTALL_TMP/planned-files.txt"
+: > "$BACKED_UP_LIST_FILE"
+: > "$PLAN_FILE"
+
 log "target: $TARGET"
 log "agents: $AGENTS"
 [ "$DRY_RUN" -eq 1 ] && log "DRY RUN — no files will be written"
 
-# --- core files ----------------------------------------------------------
-do_copy "$TPL/AGENTS.md"             "$TARGET/AGENTS.md"
-do_copy "$TPL/.workflow/stack.yml"        "$TARGET/.workflow/stack.yml"
-do_copy "$TPL/.workflow/architecture.yml" "$TARGET/.workflow/architecture.yml"
-do_copy "$TPL/.workflow/conventions.yml"  "$TARGET/.workflow/conventions.yml"
-do_copy "$TPL/.workflow/workflow.yml"     "$TARGET/.workflow/workflow.yml"
-do_copy "$TPL/.workflow/presets.yml"      "$TARGET/.workflow/presets.yml"
-do_copy "$TPL/.workflow/status.yml"       "$TARGET/.workflow/status.yml"
-do_copy "$TPL/.workflow/orchestration.yml" "$TARGET/.workflow/orchestration.yml"
-do_copy "$TPL/.workflow/session.local.yml" "$TARGET/.workflow/session.local.yml"
-do_copy "$TPL/.workflow/bootstrap.md"     "$TARGET/.workflow/bootstrap.md"
-do_copy "$TPL/.workflow/README.md"        "$TARGET/.workflow/README.md"
-do_copy "$TPL/.workflow/bin/hekate-agent" "$TARGET/.workflow/bin/hekate-agent"
-do_copy "$TPL/.workflow/bin/hekate-agent.ps1" "$TARGET/.workflow/bin/hekate-agent.ps1"
-do_copy "$TPL/.workflow/history/.gitkeep" "$TARGET/.workflow/history/.gitkeep"
+lay_down_files() {
+  # --- core files ----------------------------------------------------------
+  do_copy "$TPL/AGENTS.md"             "$TARGET/AGENTS.md"
+  do_copy "$TPL/.workflow/stack.yml"        "$TARGET/.workflow/stack.yml"
+  do_copy "$TPL/.workflow/architecture.yml" "$TARGET/.workflow/architecture.yml"
+  do_copy "$TPL/.workflow/conventions.yml"  "$TARGET/.workflow/conventions.yml"
+  do_copy "$TPL/.workflow/workflow.yml"     "$TARGET/.workflow/workflow.yml"
+  do_copy "$TPL/.workflow/presets.yml"      "$TARGET/.workflow/presets.yml"
+  do_copy "$TPL/.workflow/status.yml"       "$TARGET/.workflow/status.yml"
+  do_copy "$TPL/.workflow/orchestration.yml" "$TARGET/.workflow/orchestration.yml"
+  do_copy "$TPL/.workflow/session.local.yml" "$TARGET/.workflow/session.local.yml"
+  do_copy "$TPL/.workflow/bootstrap.md"     "$TARGET/.workflow/bootstrap.md"
+  do_copy "$TPL/.workflow/delegation.md"    "$TARGET/.workflow/delegation.md"
+  do_copy "$TPL/.workflow/subagents.md"     "$TARGET/.workflow/subagents.md"
+  do_copy "$TPL/.workflow/history-format.md" "$TARGET/.workflow/history-format.md"
+  do_copy "$TPL/.workflow/README.md"        "$TARGET/.workflow/README.md"
+  do_copy "$TPL/.workflow/bin/hekate-agent" "$TARGET/.workflow/bin/hekate-agent"
+  do_copy "$TPL/.workflow/bin/hekate-agent.ps1" "$TARGET/.workflow/bin/hekate-agent.ps1"
+  do_copy "$TPL/.workflow/history/.gitkeep" "$TARGET/.workflow/history/.gitkeep"
+
+  # --- adapters ------------------------------------------------------------
+  if has_agent claude; then
+    do_copy "$TPL/adapters/claude/CLAUDE.md" "$TARGET/CLAUDE.md"
+    for f in "$TPL/adapters/claude/commands/"*.md; do
+      [ -e "$f" ] || continue
+      do_copy "$f" "$TARGET/.claude/commands/$(basename "$f")"
+    done
+    for f in "$TPL/adapters/claude/agents/"*.md; do
+      [ -e "$f" ] || continue
+      do_copy "$f" "$TARGET/.claude/agents/$(basename "$f")"
+    done
+    copy_skills_to "$TARGET/.claude/skills"
+  fi
+
+  if has_agent cursor; then
+    do_copy "$TPL/adapters/cursor/.cursor/rules/workflow.mdc" \
+            "$TARGET/.cursor/rules/workflow.mdc"
+  fi
+
+  if has_agent codex; then
+    # Codex reads AGENTS.md directly; shared skills are copied below.
+    :
+  fi
+
+  if has_agent copilot; then
+    do_copy "$TPL/adapters/copilot/.github/copilot-instructions.md" \
+            "$TARGET/.github/copilot-instructions.md"
+  fi
+
+  if has_agent gemini; then
+    do_copy "$TPL/adapters/gemini/GEMINI.md" "$TARGET/GEMINI.md"
+  fi
+
+  if has_agent aider; then
+    do_copy "$TPL/adapters/aider/.aider.conf.yml" "$TARGET/.aider.conf.yml"
+  fi
+
+  if has_agent cursor || has_agent codex || has_agent copilot || has_agent gemini || has_agent aider; then
+    copy_skills_to "$TARGET/.agents/skills"
+  fi
+}
+
+if [ "$FORCE" -eq 1 ]; then
+  PLAN_MODE=1
+  lay_down_files
+  PLAN_MODE=0
+
+  OVERWRITE_COUNT=0
+  OVERWRITE_LIST="$INSTALL_TMP/would-overwrite.txt"
+  : > "$OVERWRITE_LIST"
+  while IFS= read -r planned_dst; do
+    [ -n "$planned_dst" ] || continue
+    if [ -e "$planned_dst" ]; then
+      printf '%s\n' "$planned_dst" >> "$OVERWRITE_LIST"
+      OVERWRITE_COUNT=$((OVERWRITE_COUNT + 1))
+    fi
+  done < "$PLAN_FILE"
+
+  if [ "$OVERWRITE_COUNT" -gt 0 ]; then
+    warn "--force enabled; $OVERWRITE_COUNT existing file(s) will be overwritten (backed up first into $BACKUP_ROOT/$RUN_TIMESTAMP/):"
+    while IFS= read -r overwrite_path; do
+      printf '[aaw]   - %s\n' "$overwrite_path" >&2
+    done < "$OVERWRITE_LIST"
+
+    if [ "$DRY_RUN" -eq 0 ] && [ "$YES" -eq 0 ]; then
+      # `[ -r /dev/tty ]` is not sufficient: the device node can be readable
+      # while the process has no controlling terminal, in which case opening
+      # it fails at redirect time with a raw shell error. Probe by opening.
+      if ! { : < /dev/tty; } 2>/dev/null; then
+        die "--force requires an interactive terminal for confirmation; pass --yes to skip the prompt in non-interactive invocations"
+      fi
+      printf '[aaw] Continue? Type "yes" to proceed: ' > /dev/tty
+      IFS= read -r force_answer < /dev/tty
+      if [ "$force_answer" != "yes" ]; then
+        die "install cancelled"
+      fi
+    fi
+  fi
+fi
+
+lay_down_files
+
+if [ "$DRY_RUN" -eq 0 ]; then
+  prune_old_backups 5
+fi
+
 if [ "$DRY_RUN" -eq 0 ] && [ -f "$TARGET/.workflow/bin/hekate-agent" ]; then
   chmod +x "$TARGET/.workflow/bin/hekate-agent"
-fi
-
-# --- adapters ------------------------------------------------------------
-if has_agent claude; then
-  do_copy "$TPL/adapters/claude/CLAUDE.md" "$TARGET/CLAUDE.md"
-  for f in "$TPL/adapters/claude/commands/"*.md; do
-    [ -e "$f" ] || continue
-    do_copy "$f" "$TARGET/.claude/commands/$(basename "$f")"
-  done
-  for f in "$TPL/adapters/claude/agents/"*.md; do
-    [ -e "$f" ] || continue
-    do_copy "$f" "$TARGET/.claude/agents/$(basename "$f")"
-  done
-  copy_skills_to "$TARGET/.claude/skills"
-fi
-
-if has_agent cursor; then
-  do_copy "$TPL/adapters/cursor/.cursor/rules/workflow.mdc" \
-          "$TARGET/.cursor/rules/workflow.mdc"
-fi
-
-if has_agent codex; then
-  # Codex reads AGENTS.md directly; shared skills are copied below.
-  :
-fi
-
-if has_agent cursor || has_agent codex; then
-  copy_skills_to "$TARGET/.agents/skills"
 fi
 
 # --- gitignore -----------------------------------------------------------

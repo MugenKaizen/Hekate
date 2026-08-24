@@ -113,6 +113,18 @@ project_has_codex_adapter() {
   state_has_adapter codex "$STATE_FILE"
 }
 
+project_has_copilot_adapter() {
+  [ -f "$TARGET/.github/copilot-instructions.md" ] || state_has_adapter copilot "$STATE_FILE"
+}
+
+project_has_gemini_adapter() {
+  [ -f "$TARGET/GEMINI.md" ] || state_has_adapter gemini "$STATE_FILE"
+}
+
+project_has_aider_adapter() {
+  [ -f "$TARGET/.aider.conf.yml" ] || state_has_adapter aider "$STATE_FILE"
+}
+
 already_backed_up() {
   backup_rel="$1"
 
@@ -137,7 +149,13 @@ backup_file() {
     return 0
   fi
 
-  backup_dst="$BACKUP_ROOT/$backup_rel.bak"
+  # Prefer the current run's timestamped backup directory
+  # (.workflow/backups/<UTC-timestamp>/<relative path>) when the calling
+  # script has set one up via RUN_BACKUP_DIR. Falls back to the flat legacy
+  # layout (.workflow/backups/<relative path>) so direct/standalone
+  # invocations (e.g. running a single migration script by hand) still work.
+  backup_root_for_run="${RUN_BACKUP_DIR:-$BACKUP_ROOT}"
+  backup_dst="$backup_root_for_run/$backup_rel"
   if [ "$DRY_RUN" -eq 1 ]; then
     log "would back up: $backup_src -> $backup_dst"
     mark_backed_up "$backup_rel"
@@ -145,9 +163,30 @@ backup_file() {
   fi
 
   mkdir -p "$(dirname "$backup_dst")"
-  cp "$backup_src" "$backup_dst"
+  cp -R "$backup_src" "$backup_dst"
   mark_backed_up "$backup_rel"
   log "backed up: $backup_dst"
+}
+
+# Keep only the most recent $1 (default 5) timestamped backup run
+# directories under $BACKUP_ROOT. Directories that don't match the
+# UTC-timestamp naming convention (e.g. pre-existing flat-layout backup
+# files from older Hekate versions) are left untouched.
+prune_old_backups() {
+  keep="${1:-5}"
+
+  [ -d "$BACKUP_ROOT" ] || return 0
+  [ "${DRY_RUN:-0}" -eq 1 ] && return 0
+
+  kept=0
+  # shellcheck disable=SC2012
+  for run_dir in $(ls -1 "$BACKUP_ROOT" 2>/dev/null | grep -E '^[0-9]{8}T[0-9]{6}Z$' | sort -r); do
+    kept=$((kept + 1))
+    if [ "$kept" -gt "$keep" ]; then
+      rm -rf "$BACKUP_ROOT/$run_dir"
+      log "pruned old backup run: $BACKUP_ROOT/$run_dir"
+    fi
+  done
 }
 
 copy_file() {

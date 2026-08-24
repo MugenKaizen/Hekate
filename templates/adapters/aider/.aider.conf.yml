@@ -1,0 +1,13 @@
+# Aider configuration for this project.
+#
+# This project uses AGENTS.md (in the project root) as the single source of
+# truth for all AI agents. `read:` loads it as read-only context on every
+# Aider session, so Aider always has it in view before making changes.
+#
+# Read AGENTS.md in full before doing any work. For pre-flight, also check
+# .workflow/status.yml for the fast initialization check and resolved
+# feature flags; if it isn't initialized, perform the Bootstrap procedure
+# from .workflow/bootstrap.md first.
+
+read:
+  - AGENTS.md

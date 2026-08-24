@@ -32,13 +32,19 @@ native_subagents:
   missing_or_invalid_mode: ask
 
 lazy_load:
-  stack: .workflow/stack.yml
-  architecture: .workflow/architecture.yml
-  conventions: .workflow/conventions.yml
-  workflow_rules: .workflow/workflow.yml
-  presets: .workflow/presets.yml
-  bootstrap: .workflow/bootstrap.md
-  orchestration: .workflow/orchestration.yml
+  # Each entry: read the file only when its condition applies. Never load
+  # these speculatively at session start — see AGENTS.md §1.1 for the
+  # authoritative condition text.
+  stack: .workflow/stack.yml # when choosing commands/deps/runtime/framework specifics
+  architecture: .workflow/architecture.yml # when changing module boundaries/layers/deps
+  conventions: .workflow/conventions.yml # when creating/editing code, tests, docs, commits
+  workflow_rules: .workflow/workflow.yml # when a process detail is missing from this file
+  presets: .workflow/presets.yml # only during initialization or preset changes
+  bootstrap: .workflow/bootstrap.md # only when pre-flight fails or /init-workflow is requested
+  orchestration: .workflow/orchestration.yml # only when orchestration.enabled and task needs routing
+  delegation: .workflow/delegation.md # only when actually delegating to an external CLI harness
+  subagents: .workflow/subagents.md # only before the first native-subagent wave, or to change policy
+  history_format: .workflow/history-format.md # only when creating/updating a task history entry
 
 required_files:
   - .workflow/stack.yml
