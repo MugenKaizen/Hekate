@@ -2,17 +2,17 @@ Set-StrictMode -Version 2.0
 
 function Write-AawLog {
     param([string]$Message)
-    Write-Host "[aaw] $Message"
+    Write-Host "[hekate] $Message"
 }
 
 function Write-AawWarn {
     param([string]$Message)
-    Write-Warning "[aaw] $Message"
+    Write-Warning "[hekate] $Message"
 }
 
 function Throw-Aaw {
     param([string]$Message)
-    throw "[aaw] ERROR: $Message"
+    throw "[hekate] ERROR: $Message"
 }
 
 function Join-AawPath {

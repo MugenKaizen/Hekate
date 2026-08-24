@@ -37,7 +37,7 @@ DRY_RUN=0
 SOURCE=""
 REF=""
 COMMIT=""
-REPO="${AAW_REPO:-MugenKaizen/Hekate}"
+REPO="${HEKATE_REPO:-MugenKaizen/Hekate}"
 
 # --- args ----------------------------------------------------------------
 for arg in "$@"; do
@@ -63,9 +63,9 @@ for arg in "$@"; do
 done
 
 # --- helpers -------------------------------------------------------------
-log()  { printf '[aaw] %s\n' "$*"; }
-warn() { printf '[aaw] WARN: %s\n' "$*" >&2; }
-die()  { printf '[aaw] ERROR: %s\n' "$*" >&2; exit 1; }
+log()  { printf '[hekate] %s\n' "$*"; }
+warn() { printf '[hekate] WARN: %s\n' "$*" >&2; }
+die()  { printf '[hekate] ERROR: %s\n' "$*" >&2; exit 1; }
 
 write_state_file() {
   state_file="$TARGET/.workflow/state.yml"
@@ -342,7 +342,7 @@ if [ "$FORCE" -eq 1 ]; then
   if [ "$OVERWRITE_COUNT" -gt 0 ]; then
     warn "--force enabled; $OVERWRITE_COUNT existing file(s) will be overwritten (backed up first into $BACKUP_ROOT/$RUN_TIMESTAMP/):"
     while IFS= read -r overwrite_path; do
-      printf '[aaw]   - %s\n' "$overwrite_path" >&2
+      printf '[hekate]   - %s\n' "$overwrite_path" >&2
     done < "$OVERWRITE_LIST"
 
     if [ "$DRY_RUN" -eq 0 ] && [ "$YES" -eq 0 ]; then
@@ -352,7 +352,7 @@ if [ "$FORCE" -eq 1 ]; then
       if ! { : < /dev/tty; } 2>/dev/null; then
         die "--force requires an interactive terminal for confirmation; pass --yes to skip the prompt in non-interactive invocations"
       fi
-      printf '[aaw] Continue? Type "yes" to proceed: ' > /dev/tty
+      printf '[hekate] Continue? Type "yes" to proceed: ' > /dev/tty
       IFS= read -r force_answer < /dev/tty
       if [ "$force_answer" != "yes" ]; then
         die "install cancelled"
