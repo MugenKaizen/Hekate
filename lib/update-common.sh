@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 
-log()  { printf '[aaw] %s\n' "$*"; }
-warn() { printf '[aaw] WARN: %s\n' "$*" >&2; }
-die()  { printf '[aaw] ERROR: %s\n' "$*" >&2; exit 1; }
+log()  { printf '[hekate] %s\n' "$*"; }
+warn() { printf '[hekate] WARN: %s\n' "$*" >&2; }
+die()  { printf '[hekate] ERROR: %s\n' "$*" >&2; exit 1; }
 
 read_state_value() {
   state_key="$1"

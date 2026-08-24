@@ -27,7 +27,7 @@
 set -eu
 
 TARGET="$(pwd)"
-REPO="${AAW_REPO:-MugenKaizen/Hekate}"
+REPO="${HEKATE_REPO:-MugenKaizen/Hekate}"
 REF="HEAD"
 COMMIT=""
 AGENTS=""
@@ -52,7 +52,7 @@ for arg in "$@"; do
       exit 0
       ;;
     *)
-      printf '[aaw] ERROR: unknown arg: %s\n' "$arg" >&2
+      printf '[hekate] ERROR: unknown arg: %s\n' "$arg" >&2
       exit 2
       ;;
   esac
@@ -191,7 +191,7 @@ confirm_force_update() {
     die "--force requires an interactive terminal for confirmation"
   fi
 
-  printf '[aaw] Continue? Type "yes" to proceed: ' > /dev/tty
+  printf '[hekate] Continue? Type "yes" to proceed: ' > /dev/tty
   IFS= read -r answer < /dev/tty
   if [ "$answer" != "yes" ]; then
     die "update cancelled"

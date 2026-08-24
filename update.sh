@@ -23,7 +23,7 @@ set -eu
 
 TARGET="$(pwd)"
 SOURCE=""
-REPO="${AAW_REPO:-MugenKaizen/Hekate}"
+REPO="${HEKATE_REPO:-MugenKaizen/Hekate}"
 REF=""
 COMMIT=""
 AGENTS=""
@@ -49,14 +49,14 @@ for arg in "$@"; do
       exit 0
       ;;
     *)
-      printf '[aaw] ERROR: unknown arg: %s\n' "$arg" >&2
+      printf '[hekate] ERROR: unknown arg: %s\n' "$arg" >&2
       exit 2
       ;;
   esac
 done
 
-log()  { printf '[aaw] %s\n' "$*"; }
-die()  { printf '[aaw] ERROR: %s\n' "$*" >&2; exit 1; }
+log()  { printf '[hekate] %s\n' "$*"; }
+die()  { printf '[hekate] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [ -z "$REF" ] || [ -z "$COMMIT" ] || die "use either --ref or --commit"
 if [ -n "$COMMIT" ]; then

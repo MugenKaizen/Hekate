@@ -6,6 +6,13 @@ All notable changes to Hekate are documented here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+- Installer and updater output is prefixed `[hekate]` instead of `[aaw]`, a
+  leftover from an earlier project name that was visible on every line the user
+  sees. Temporary working directories follow the same rename.
+- The undocumented `AAW_REPO` environment variable is now `HEKATE_REPO`.
+
 ## [0.2.0-beta.1] - 2026-08-25
 
 ### Changed
