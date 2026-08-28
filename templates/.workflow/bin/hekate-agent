@@ -70,6 +70,7 @@ if [ -z "$ROOT" ]; then ROOT="$(find_root)" || die "cannot find .workflow/orches
 ROOT="$(CDPATH= cd -- "$ROOT" && pwd -P)"
 CONFIG="$ROOT/.workflow/orchestration.yml"
 LOCAL_CONFIG="$ROOT/.workflow/orchestration.local.yml"
+STATUS_CONFIG="$ROOT/.workflow/status.yml"
 
 unquote() {
   printf '%s\n' "$1" | awk '{ v=$0; sub(/^[[:space:]]+/,"",v); sub(/[[:space:]]+$/,"",v); if ((substr(v,1,1)=="\"" && substr(v,length(v),1)=="\"") || (substr(v,1,1)=="\047" && substr(v,length(v),1)=="\047")) v=substr(v,2,length(v)-2); print v }'
@@ -101,6 +102,43 @@ top_value() {
   [ -f "$file" ] || return 0
   raw="$(awk -v key="$key" '$0 ~ "^" key ":[[:space:]]*" { v=$0; sub("^" key ":[[:space:]]*","",v); sub(/[[:space:]]+#.*/,"",v); print v; exit }' "$file")"
   [ -z "$raw" ] || unquote "$raw"
+}
+
+_section_raw() {
+  file="$1" section="$2" key="$3"
+  [ -f "$file" ] || return 0
+  awk -v section="$section" -v key="$key" "$_indent_awk_prelude"'
+    BEGIN { inside = 0; key_indent = "" }
+    {
+      raw = $0
+      if (raw ~ /^[[:space:]]*$/ || raw ~ /^[[:space:]]*#/) next
+      ind = indent_of(raw)
+      content = raw; sub(/^ */, "", content)
+      if (!inside) {
+        if (ind == 0 && content == section ":") inside = 1
+        next
+      }
+      if (ind == 0) exit
+      if (key_indent == "") key_indent = ind
+      if (ind == key_indent && content ~ "^" key ":[[:space:]]*") {
+        v = content
+        sub("^" key ":[[:space:]]*", "", v)
+        sub(/[[:space:]]+#.*/, "", v)
+        print "F:" v
+        exit
+      }
+    }
+  ' "$file"
+}
+
+section_value() {
+  raw="$(_section_raw "$@")"
+  case "$raw" in F:*) unquote "${raw#F:}" ;; *) printf '\n' ;; esac
+}
+
+section_present() {
+  raw="$(_section_raw "$@")"
+  case "$raw" in F:*) return 0 ;; *) return 1 ;; esac
 }
 
 _nested_raw() {
@@ -485,6 +523,12 @@ run_command() {
     esac
   done
   [ "$PROFILE_EXPLICIT" -eq 0 ] || [ "$HARNESS_EXPLICIT" -eq 0 ] || die "use either --profile or --harness"
+  if section_present "$STATUS_CONFIG" hekate enabled; then
+    [ "$(section_value "$STATUS_CONFIG" hekate enabled)" = true ] || die "Hekate is disabled in .workflow/status.yml"
+  fi
+  if nested_present "$STATUS_CONFIG" hekate modules orchestration; then
+    [ "$(nested_value "$STATUS_CONFIG" hekate modules orchestration)" = true ] || die "orchestration module is disabled in .workflow/status.yml"
+  fi
   [ "$(local_or_base_top enabled)" = true ] || die "orchestration is disabled; run: hekate-agent config use <harness>"
 
   if [ "$PROFILE_EXPLICIT" -eq 0 ] && [ "$HARNESS_EXPLICIT" -eq 0 ]; then PROFILE="$(effective_default_profile)"; fi

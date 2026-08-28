@@ -124,6 +124,29 @@ implicit=$(find .workflow/runs -mindepth 1 -maxdepth 1 -type d | head -n 1)
 [ "$(cat "$implicit/profile")" = medium ] || fail 'committed default profile not persisted'
 [ "$(cat "$implicit/model")" = fake/sol ] || fail 'committed profile model not resolved'
 
+# A missing module block preserves old behavior, but explicit switches prevent
+# new jobs even when orchestration.yml itself is enabled.
+cat > .workflow/status.yml <<'EOF'
+hekate:
+  enabled: true
+  modules:
+    orchestration: false
+EOF
+if $CLI run --task nope >/dev/null 2>&1; then fail 'disabled orchestration module accepted a run'; fi
+cat > .workflow/status.yml <<'EOF'
+hekate:
+    enabled: true
+    modules:
+        orchestration:
+EOF
+if $CLI run --task nope >/dev/null 2>&1; then fail 'empty orchestration module with four-space indentation accepted a run'; fi
+cat > .workflow/status.yml <<'EOF'
+hekate:
+  enabled: false
+EOF
+if $CLI run --task nope >/dev/null 2>&1; then fail 'disabled Hekate accepted a run'; fi
+rm .workflow/status.yml
+
 # Dotted profile and harness names match exactly; quoted values are unquoted.
 harnesses=$($CLI harnesses)
 dotted_harness_line=$(printf '%s\n' "$harnesses" | grep '^fake\.cli ')

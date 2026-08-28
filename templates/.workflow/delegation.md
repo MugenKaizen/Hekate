@@ -1,13 +1,13 @@
 # Cross-harness delegation
 
-Read this file only when `.workflow/status.yml → orchestration.enabled` is
-`true` **and** the current task actually needs to delegate bounded work to a
+Read this file only when `.workflow/status.yml → hekate.modules.orchestration`
+and `orchestration.enabled` are both `true` **and** the current task actually needs to delegate bounded work to a
 configured external CLI harness (Claude Code, pi, OpenCode, Codex, Gemini,
 Aider, or a custom entry). This is `AGENTS.md` §3.6 material, mandatory
 whenever delegation is used, just not loaded at session start or on tasks
 that never delegate.
 
-When `orchestration.enabled` is `true`, the **primary harness** — the current
+When the module and `orchestration.enabled` are `true`, the **primary harness** — the current
 user-facing agent session — may delegate a bounded task to a configured child
 harness through the project-local job controller. The primary harness
 exclusively owns architecture, task decomposition, profile and model

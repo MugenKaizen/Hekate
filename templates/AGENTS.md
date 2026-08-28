@@ -6,8 +6,8 @@ agent-specific files (`CLAUDE.md`, `.cursor/rules/*`, and so on) must
 point here.
 
 > **Rule #0.** Before doing anything in this project: read this file in full
-> (it is a short, always-load core — roughly 100 lines) and read
-> `.workflow/status.yml` for the fast pre-flight check. Everything else —
+> (it is a short, always-load core) and read `.workflow/status.yml` for the
+> Hekate master switch, module allowlist, and fast pre-flight check. Everything else —
 > the full history file format, cross-harness delegation mechanics,
 > native-subagent policy detail, and every `.workflow/*.yml` config — is
 > lazy-loaded per §1.1, **only** when the current task actually needs it.
@@ -20,16 +20,24 @@ point here.
 ## 1. Pre-flight check (required before any task)
 
 1. Read `.workflow/status.yml` only.
-2. Verify these fast-check values:
+2. Apply `status.yml → hekate` first:
+   - if `hekate.enabled` is `false`, stop applying Hekate rules and continue
+     with the harness's native/default behavior;
+   - a module runs only when `hekate.enabled` and its value under
+     `hekate.modules` are both `true`;
+   - missing `hekate` or module keys mean `true` for compatibility with older
+     installations.
+3. If `hekate.modules.workflow` is `false`, skip the initialization checks
+   below and use only the enabled standalone modules. Otherwise verify:
    - `initialized: true`
    - `active_preset` is not `null`
    - `checks.required_files_present: true`
    - `checks.required_fields_filled: true`
-3. If `.workflow/status.yml` is missing, any value above fails, or any value is
+4. If `.workflow/status.yml` is missing, any required value above fails, or any value is
    `unknown` — **stop**, read `.workflow/bootstrap.md`, and run or refresh that
    procedure. Do not write code, do not create plans, do not make edits until
    initialization is complete and `.workflow/status.yml` is updated.
-4. If the fast check passes — proceed to **§3 Task workflow**. When deciding
+5. If the fast check passes — proceed to **§3 Task workflow**. When deciding
    which stages are mandatory, use `status.yml → features`. Read
    `.workflow/workflow.yml` only if a needed rule is not represented in
    `status.yml`. Use `status.yml → orchestration` to decide whether external
@@ -52,8 +60,9 @@ current task needs the information:
   workflow feature customization.
 - `.workflow/bootstrap.md` — only when the fast pre-flight check fails or the
   user explicitly asks to initialize the workflow.
-- `.workflow/orchestration.yml` — only when `status.yml → orchestration.enabled`
-  is true and the task needs cross-harness delegation or model routing.
+- `.workflow/orchestration.yml` — only when both
+  `status.yml → hekate.modules.orchestration` and `orchestration.enabled` are
+  true and the task needs cross-harness delegation or model routing.
 - `.workflow/delegation.md` — only alongside `orchestration.yml`, when a task
   actually delegates to an external CLI harness (§3.6 lives here now).
 - `.workflow/session.local.yml` — only before considering a native-subagent
@@ -65,7 +74,8 @@ current task needs the information:
 
 ### 1.2 Native-subagent session policy (summary)
 
-The primary harness may use its native subagents for bounded advisory,
+When `status.yml → hekate.modules.native_subagents` is `true`, the primary
+harness may use its native subagents for bounded advisory,
 research, review, validation, or execution work, while retaining all
 architecture, decomposition, orchestration, and acceptance authority.
 `subagents.mode` (from `.workflow/session.local.yml`) is `off` (never
@@ -88,11 +98,11 @@ workflow" / "/init-workflow".
 
 ## 3. Task workflow (task execution cycle, in brief)
 
-For **every non-trivial task**, this order is required: **Analyze → Options →
-Plan → Execute → Verify**, plus optional cross-harness delegation during
-Execute. Every rule below is mandatory when its stage applies; none of it is
-optional reading — only the deep-dive files linked from each stage are
-lazy-loaded.
+When `status.yml → hekate.modules.workflow` is `true`, every non-trivial task
+uses **Analyze → Options → Plan → Execute → Verify**, with mandatory stages
+selected by `status.yml → features`. When the module is `false`, §3.1-§3.5 do
+not apply. Optional cross-harness delegation remains independently available
+when its module is enabled.
 
 ### 3.1 Analyze
 
@@ -113,7 +123,9 @@ before writing the plan.
 
 ### 3.3 Plan
 
-Write a **self-contained** plan to `.workflow/history/YYYY-MM-DD-<slug>.md` —
+Write a **self-contained** plan. When the history module is enabled, write it
+to `.workflow/history/YYYY-MM-DD-<slug>.md`; otherwise keep it in the current
+conversation. It must include
 context, affected files, atomic steps, verification, rollback notes, and (for
 large tasks under `granular_commits`) a checkpoint checklist. See
 `.workflow/history-format.md` for the exact template and field rules. When
@@ -127,25 +139,23 @@ approval before executing.
 Follow the plan step by step; if it turns out wrong, stop, update it, get
 re-approval. Follow the resolved `light_tdd` mode (default `strict-lite`:
 test-first unless a stated reason not to). If `granular_commits` applies,
-execute checkpoint by checkpoint, mark each complete in the task history after
-verification, and commit per the resolved mode (`auto` → commit immediately;
-`ask` → confirm with the user first). Commit messages follow
+execute checkpoint by checkpoint and commit per the resolved mode (`auto` →
+commit immediately; `ask` → confirm with the user first). Commit messages follow
 `conventions.yml`. No unrequested refactors, no undiscussed dependencies (see
 `workflow.yml → scope_control`).
 
 ### 3.5 Verify
 
 Run the Verification commands. If light TDD was bypassed, confirm the
-follow-up test was added and passes. Update checkpoint status and append
-`checkpoint_completed` / `checkpoint_committed` events as they happen. Update
-the plan file's `Result` section (what was done, what was checked, known
-limitations), then append a `verified` event to
-`.workflow/history/events.jsonl`. Full event schema and allowed `type` values
-are in `.workflow/history-format.md`.
+follow-up test was added and passes. When the history module is enabled, update
+checkpoint status and the plan file's `Result` section, then append the
+applicable events to `.workflow/history/events.jsonl`. Full event schema and
+allowed `type` values are in `.workflow/history-format.md`.
 
 ### 3.6 Optional cross-harness delegation
 
-When `.workflow/status.yml → orchestration.enabled` is `true`, the primary
+When both `.workflow/status.yml → hekate.modules.orchestration` and
+`orchestration.enabled` are `true`, the primary
 harness may delegate a bounded task to a configured child CLI harness via
 `.workflow/bin/hekate-agent`, while retaining architecture, decomposition,
 routing, review, and final-verification ownership. Read
@@ -158,10 +168,12 @@ not acceptance, never bypass permissions to make an unattended run "succeed").
 
 ## 4. History (.workflow/history/)
 
-Gitignored, per-developer continuity, not a shared project artifact. Every
-non-trivial task gets `history/YYYY-MM-DD-<slug>.md` (Analysis / Options /
-Plan / Result, plus a checkpoint checklist when `granular_commits` applies)
-and events in `history/events.jsonl`. Full template and event schema:
+Enabled only when `status.yml → hekate.modules.history` is `true`. It is
+gitignored, per-developer continuity, not a shared project artifact. Every
+non-trivial task gets `history/YYYY-MM-DD-<slug>.md`; with the workflow module
+enabled it contains Analysis / Options / Plan / Result, otherwise it records
+the context, work performed, and result without imposing those stages. Events
+go to `history/events.jsonl`. Full template and event schema:
 `.workflow/history-format.md` (read only during Plan/Verify — see §1.1).
 
 ---
@@ -179,7 +191,7 @@ and events in `history/events.jsonl`. Full template and event schema:
 
 ## 6. References (pointer index)
 
-Always-load: `status.yml`. Everything else below is lazy-loaded per §1.1 —
+Always-load: `status.yml` (including `hekate.enabled` and `hekate.modules`). Everything else below is lazy-loaded per §1.1 —
 read only when the noted condition applies.
 
 | File | Read when |

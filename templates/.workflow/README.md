@@ -12,7 +12,7 @@ for how the agent works.
 | `architecture.yml` | Style, layers, modules, dependency rules |
 | `conventions.yml` | Code style, naming, tests, commits |
 | `workflow.yml` | Rules for the agent itself: stages, light TDD, granular commits, history, blocking |
-| `status.yml` | Fast pre-flight index: initialized flag, active preset, resolved feature flags |
+| `status.yml` | Fast pre-flight index: Hekate switch/module allowlist, initialized flag, active preset, resolved feature flags |
 | `orchestration.yml` | Optional declarative registry for Claude, pi, OpenCode, Codex, Gemini, Aider, and custom CLI harnesses |
 | `session.local.yml` | Gitignored native-subagent policy for the current primary session: `off`, `ask`, or `auto` |
 | `bin/hekate-agent` | POSIX long-running job controller; PowerShell counterpart: `hekate-agent.ps1` |
@@ -26,38 +26,44 @@ for how the agent works.
 
 ## Rules
 
-1. **Without filled-in configs the agent does not work.** At startup the agent
+1. **Apply the Hekate switch first.** At startup the agent reads
+   `.workflow/status.yml → hekate`. `enabled: false` disables all Hekate
+   behavior. With Hekate enabled, `modules` independently controls `workflow`,
+   `history`, `native_subagents`, and `orchestration`. Missing keys mean true
+   for compatibility with older installations.
+
+2. **Without filled-in configs the workflow module does not work.** At startup the agent
    reads `.workflow/status.yml` only. If `initialized` is not `true`,
    `active_preset` is `null`, or any `checks.*` value is not `true`, the agent
    must stop, read `.workflow/bootstrap.md`, and run or refresh the
    initialization procedure described there.
 
-2. **Every task → an entry in `history/`.** A file
+3. **When history is enabled, every task → an entry in `history/`.** A file
    `history/YYYY-MM-DD-<slug>.md` is created with sections
    analysis / options / plan / result and, for large tasks,
    checkpoint checklist, plus an event in
    `history/events.jsonl`.
 
-3. **Task format**: Analyze → Options (≥2 with pros/cons) → Plan → Execute.
+4. **When workflow is enabled, task format**: Analyze → Options (≥2 with pros/cons) → Plan → Execute.
    The plan must be self-contained — runnable in a new session without
    additional context.
 
-4. **Light TDD for behavior changes.** `status.yml → features.light_tdd`
+5. **Light TDD for behavior changes.** `status.yml → features.light_tdd`
    controls the rule. The default is `strict-lite`: for a non-trivial
    behavior change, prefer a focused test first, then the minimum code to make
    it pass. Trivial/docs/config/mechanical edits may skip it.
 
-5. **Granular commits for large tasks.**
+6. **Granular commits for large tasks.**
    `status.yml → features.granular_commits` controls whether large tasks are
    split into verified checkpoints with intermediate commits.
 
-6. **Edits to the configs** are made deliberately: after a change the
+7. **Edits to the configs** are made deliberately: after a change the
    agent must verify that the project's current code still matches them
    and report any discrepancies. If the change affects initialization status,
    active preset, required fields, or resolved feature flags, update
    `.workflow/status.yml` in the same change.
 
-7. **Workflow updates are conservative.** The updater runs ordered
+8. **Workflow updates are conservative.** The updater runs ordered
    migrations for known managed paths, preserves unknown/custom keys,
    and creates one backup per changed file in `backups/`.
 

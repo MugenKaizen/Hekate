@@ -201,6 +201,20 @@ exit /b 2
     if ((Get-Content -LiteralPath (Join-Path $implicitDir 'profile') -Raw).Trim() -ne 'medium') { TestFail 'committed default profile not persisted' }
     if ((Get-Content -LiteralPath (Join-Path $implicitDir 'model') -Raw).Trim() -ne 'fake/sol') { TestFail 'committed profile model not resolved' }
 
+    # Explicit module switches prevent new jobs; a missing block above retained
+    # backward-compatible behavior.
+    $statusPath = Join-Path $Project '.workflow\status.yml'
+    [IO.File]::WriteAllLines($statusPath, @('hekate:', '  enabled: true', '  modules:', '    orchestration: false'), [Text.UTF8Encoding]::new($false))
+    $r = Invoke-Hekate 'run' '--task' 'nope'
+    if ($r.Code -eq 0) { TestFail 'disabled orchestration module accepted a run' }
+    [IO.File]::WriteAllLines($statusPath, @('hekate:', '    enabled: true', '    modules:', '        orchestration:'), [Text.UTF8Encoding]::new($false))
+    $r = Invoke-Hekate 'run' '--task' 'nope'
+    if ($r.Code -eq 0) { TestFail 'empty orchestration module with four-space indentation accepted a run' }
+    [IO.File]::WriteAllLines($statusPath, @('hekate:', '  enabled: false'), [Text.UTF8Encoding]::new($false))
+    $r = Invoke-Hekate 'run' '--task' 'nope'
+    if ($r.Code -eq 0) { TestFail 'disabled Hekate accepted a run' }
+    Remove-Item -LiteralPath $statusPath
+
     # Dotted profile/harness names.
     $harnesses = (Invoke-Hekate 'harnesses').Out
     $dottedLine = ($harnesses -split "`n") | Where-Object { $_ -match '^fake\.cli\s' }

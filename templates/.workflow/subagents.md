@@ -1,5 +1,8 @@
 # Native-subagent session policy
 
+This policy applies only when `status.yml → hekate.enabled` and
+`hekate.modules.native_subagents` are both `true`.
+
 Read this file only before the primary harness's first native-subagent wave
 in a session, or when the user asks to change the subagent policy. This is
 `AGENTS.md` §1.2 material, mandatory whenever native subagents are used, just

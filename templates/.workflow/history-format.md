@@ -1,10 +1,9 @@
 # History file format
 
-Read this file only when you are about to create or update a task history
-entry — i.e. during **Plan** (creating `.workflow/history/YYYY-MM-DD-<slug>.md`)
-or **Verify** (updating its `Result` section and appending to `events.jsonl`).
-This is `AGENTS.md` §3.3–§3.5 material; the rules below are mandatory whenever
-those steps apply, they are simply not loaded at session start.
+Read this file only when `status.yml → hekate.modules.history` is `true` and
+you are about to create or update a task history entry. With the workflow
+module enabled this happens during Plan and Verify. Without the workflow
+module, history records the work without imposing workflow stages.
 
 `.workflow/history/` is **in `.gitignore`** and is not shared with the team.
 It exists so the agent has continuity between sessions.
@@ -50,6 +49,21 @@ It exists so the agent has continuity between sessions.
 The `Checkpoint checklist` section is required only for large tasks when
 `status.yml → features.granular_commits` is `true`.
 
+When `hekate.modules.workflow` is `false`, use the compact standalone format:
+
+```markdown
+# <Task title>
+
+## Context
+<request and relevant constraints>
+
+## Work
+<changes or actions performed>
+
+## Result
+<checks performed, outcome, and remaining limitations>
+```
+
 The plan section must be **self-contained** — it can be opened in a new
 session without context and executed. It must include:
 
@@ -84,7 +98,7 @@ Every significant state change — one JSON line in
 
 Allowed `type` values: `started | analyzed | options_proposed | planned | checkpoint_completed | checkpoint_committed | executed | verified | blocked`.
 
-An event must be appended:
+With the workflow module enabled, an event must be appended:
 
 - `started` — when a non-trivial task begins (Analyze).
 - `analyzed` — after Analyze completes.
@@ -96,3 +110,6 @@ An event must be appended:
   `{"ts": "<ISO-8601>", "task_slug": "<slug>", "type": "verified", "summary": "<1 line>"}`.
 - `blocked` — whenever the task cannot proceed (missing info, failing
   precondition, denied confirmation for a destructive action).
+
+Without the workflow module, append only the events that describe actual work,
+normally `started`, `executed`, `verified`, or `blocked`.

@@ -432,6 +432,9 @@ run_migrations
 update_template_file "AGENTS.md" "AGENTS.md"
 update_root_readme
 update_template_file ".workflow/bootstrap.md" ".workflow/bootstrap.md"
+update_template_file ".workflow/delegation.md" ".workflow/delegation.md"
+update_template_file ".workflow/subagents.md" ".workflow/subagents.md"
+update_template_file ".workflow/history-format.md" ".workflow/history-format.md"
 update_template_file ".workflow/README.md" ".workflow/README.md"
 update_template_file ".workflow/orchestration.yml" ".workflow/orchestration.yml"
 update_template_file ".workflow/bin/hekate-agent" ".workflow/bin/hekate-agent"

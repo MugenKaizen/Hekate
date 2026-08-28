@@ -6,6 +6,14 @@ All notable changes to Hekate are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- A master Hekate switch and module allowlist for independently enabling the
+  workflow, local task history, native subagents, and cross-harness
+  orchestration. Initialization offers `all`, `history + subagents`, `off`, or
+  a custom selection; migration `009-add-module-switches` preserves the old
+  all-enabled behavior for existing installations.
+
 ### Changed
 
 - Installer and updater output is prefixed `[hekate]` instead of `[aaw]`, a

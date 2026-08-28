@@ -7,8 +7,13 @@ the option that was agreed on):
 
 $ARGUMENTS
 
-Plan requirements — from `AGENTS.md` section 3.3. The plan is written to
-`.workflow/history/YYYY-MM-DD-<slug>.md` and must be **self-contained** —
+First verify that neither `status.yml → hekate.enabled` nor
+`hekate.modules.workflow` is explicitly false. If either is false, explain that the workflow module is
+disabled and suggest `/init-workflow` to change the module selection.
+
+Plan requirements — from `AGENTS.md` section 3.3. When the history module is
+enabled, the plan is written to `.workflow/history/YYYY-MM-DD-<slug>.md`;
+otherwise return it in the conversation. It must be **self-contained** —
 it can be opened in a new session without context and executed.
 
 Required sections:
@@ -37,5 +42,5 @@ If solution options haven't been discussed yet, first go back to the
 **Options** stage (at least 2 options with pros/cons), get agreement on
 an option, and only then write the plan.
 
-After the plan is written, append a `planned` event to
+When the history module is enabled, after the plan is written append a `planned` event to
 `.workflow/history/events.jsonl`.

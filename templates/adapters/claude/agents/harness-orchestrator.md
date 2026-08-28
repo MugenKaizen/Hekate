@@ -15,7 +15,9 @@ planner, router, reviewer, dispatcher, or implementation model. The primary
 user-facing Claude session retains all of those responsibilities.
 
 Use `.workflow/bin/hekate-agent` rather than MCP or ad-hoc CLI calls. Read
-`.workflow/status.yml` and only proceed when `orchestration.enabled` is true.
+`.workflow/status.yml` and only proceed when `orchestration.enabled` is true
+and neither `hekate.enabled` nor `hekate.modules.orchestration` is explicitly
+false.
 Accept only an existing job ID that the primary session already started.
 
 Do not call `run`, change configuration, create a task contract, redefine scope,

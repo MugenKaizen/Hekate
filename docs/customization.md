@@ -18,6 +18,41 @@ If you need fields that are not in the template (for example, special
 environments or your company's security policies) — just add them. The
 agent does not complain about "extra" keys.
 
+### 2a. Enabling only selected Hekate modules
+
+The master switch and module allowlist live in both `workflow.yml` and the
+fast startup index `status.yml`. Keep the two copies synchronized.
+
+Disable Hekate completely:
+
+```yaml
+hekate:
+  enabled: false
+```
+
+Keep only local task history and native subagents:
+
+```yaml
+hekate:
+  enabled: true
+  modules:
+    workflow: false
+    history: true
+    native_subagents: true
+    orchestration: false
+```
+
+The modules are independent. Disabling `workflow` bypasses initialization,
+presets, stages, TDD, granular commits, and process feature flags. History can
+still record work without imposing workflow stages. Native subagents still
+obey `.workflow/session.local.yml → subagents.mode`; enabling the module never
+implicitly selects `auto`. External jobs additionally require
+`.workflow/orchestration.yml → enabled: true`.
+
+Run `/init-workflow` to choose `all`, `history + subagents`, `off`, or a custom
+module allowlist interactively. A missing switch/module key is treated as
+enabled so installations from older Hekate versions retain their behavior.
+
 For fields that should **block work** when empty, add them to
 `workflow.yml → blocking.required_non_empty_fields` and mirror the check in
 `.workflow/status.yml`:

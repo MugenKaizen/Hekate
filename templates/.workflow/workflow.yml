@@ -8,13 +8,23 @@
 # corresponding fields here. To add a new customizable feature, edit
 # `.workflow/presets.yml → features:` — do not hardcode it in AGENTS.md.
 
+hekate:
+  # Master switch plus a module allowlist. Mirror these values to status.yml.
+  # Disabling workflow also disables all process feature flags below.
+  enabled: true
+  modules:
+    workflow: true
+    history: true
+    native_subagents: true
+    orchestration: true
+
 meta:
   # Filled by /init-workflow. Mirrors .workflow/presets.yml → meta.active_preset.
   # Values: fast | medium | full | custom | null (not initialized).
   preset: null
 
 process:
-  # Every non-trivial task goes through these stages in this order.
+  # When the workflow module is enabled, every non-trivial task uses these stages.
   # Trivial ones (typos, single-line edits) may skip options and go straight to plan.
   require_analysis: true            # feature_id: require_analysis — see .workflow/presets.yml
   require_options:                  # feature_id: require_options — see .workflow/presets.yml

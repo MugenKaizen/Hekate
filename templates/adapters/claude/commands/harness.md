@@ -10,6 +10,11 @@ Use the project-local cross-harness runner for this request:
 $ARGUMENTS
 ```
 
+First require `orchestration.enabled` to be true and ensure neither
+`status.yml → hekate.enabled` nor `hekate.modules.orchestration` is explicitly
+false. If disabled, do not start or manage jobs; suggest `/init-workflow` to change the
+module selection or orchestration configuration.
+
 The runner is `.workflow/bin/hekate-agent`. Do not invoke another harness
 through an ad-hoc shell command when the runner can represent the operation.
 

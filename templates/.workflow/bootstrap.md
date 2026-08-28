@@ -5,9 +5,26 @@ missing, `presets.yml → meta.active_preset` is `null`, a required field is
 empty, `.workflow/status.yml` is missing or not initialized, or the user
 explicitly asks to "initialize the workflow" / "/init-workflow".
 
-## 1. Choose a workflow preset
+## 1. Choose enabled Hekate modules
 
-Before interviewing or analyzing, read `.workflow/presets.yml`. Ask the user
+Read `.workflow/status.yml` and ask which Hekate modules should be active:
+
+- **all** — workflow, task history, native subagents, and cross-harness orchestration;
+- **history + subagents** — only task history and native subagents;
+- **off** — disable all Hekate behavior;
+- **custom** — choose each module independently.
+
+Write the result to `workflow.yml → hekate` and mirror it to
+`status.yml → hekate`. `off` sets `hekate.enabled: false`; every other choice
+sets it to `true` and writes the module allowlist. If Hekate or its workflow
+module is disabled, do not require project initialization or an active preset.
+Configure enabled standalone modules only, ensure their local files exist,
+then finish. Enabling `native_subagents` does not mean `auto`; its separate
+local mode remains `off | ask | auto`, with `ask` as the safe default.
+
+## 2. Choose a workflow preset
+
+Only when the workflow module is enabled, read `.workflow/presets.yml`. Ask the user
 **one** question first:
 
 > Which workflow preset do you want?
@@ -33,9 +50,9 @@ Then:
 Write the chosen preset name to `.workflow/presets.yml → meta.active_preset`
 and mirror it to `.workflow/workflow.yml → meta.preset`.
 
-### 1.1 Configure optional cross-harness delegation
+### 2.1 Configure optional cross-harness delegation
 
-Ask whether the project should enable long-running delegation to external CLI
+Only when the orchestration module is enabled, ask whether the project should enable long-running delegation to external CLI
 harnesses. This uses the local `.workflow/bin/hekate-agent` job controller — no
 MCP server or daemon.
 
@@ -95,12 +112,12 @@ CLI flags are version-sensitive. If `doctor` or a smoke test shows that an
 installed harness changed its non-interactive flags, update only its declarative
 registry entry rather than the runner.
 
-## 2. Identify the project type
+## 3. Identify the project type
 
 - **New** (empty repo / just `git init`) → *interview* mode.
 - **Existing** (has sources, manifests) → *analyze + confirm* mode.
 
-## 3. New project: interview
+## 4. New project: interview
 
 Ask the user questions by groups, one group at a time:
 
@@ -122,7 +139,7 @@ Ask the user questions by groups, one group at a time:
 
 After each group, show the filled-in YAML and ask the user to confirm or adjust.
 
-## 4. Existing project: analysis
+## 5. Existing project: analysis
 
 Analyze the repo **on your own**, gathering facts:
 
@@ -150,11 +167,12 @@ Based on the facts, fill out drafts of all four YAML files. Then:
    show all presets.
 6. Ask the user to confirm or correct each file.
 
-## 5. Finishing initialization
+## 6. Finishing initialization
 
 - Write all YAML files: `stack.yml`, `architecture.yml`, `conventions.yml`,
   `workflow.yml`, and `presets.yml` (with `meta.active_preset` set).
 - Write `.workflow/status.yml` as the fast pre-flight index:
+  - `hekate.enabled` and `hekate.modules.*` mirror `workflow.yml → hekate`
   - `initialized: true`
   - `active_preset` equal to `presets.yml → meta.active_preset`
   - `checks.required_files_present: true`
@@ -167,14 +185,14 @@ Based on the facts, fill out drafts of all four YAML files. Then:
     `native_subagents.missing_or_invalid_mode: ask`
   - `required_files` and `required_non_empty_fields` mirror the blocking rules
     from `workflow.yml`
-- Create `.workflow/history/` if it does not exist.
-- Ensure `.workflow/session.local.yml` exists with `subagents.mode: ask` when no
+- Create `.workflow/history/` if the history module is enabled and it does not exist.
+- If the native-subagents module is enabled, ensure `.workflow/session.local.yml` exists with `subagents.mode: ask` when no
   local choice exists. Never overwrite an explicit local `off` / `ask` / `auto`
   choice during bootstrap.
 - Make sure `.workflow/history/` and `.workflow/session.local.yml` are in
   `.gitignore` (if not, add them).
 - Tell the user: "The workflow is initialized. You can now assign tasks."
-- Create the first history entry for the bootstrap itself:
+- If the history module is enabled, create the first history entry for the bootstrap itself:
   `.workflow/history/<date>-bootstrap.md`. Include the chosen preset name
   and the resolved feature map so future sessions know what was applied.
 - If `workflow.yml → git.three_branch_model.enabled` is `true`, ensure
@@ -189,7 +207,7 @@ Based on the facts, fill out drafts of all four YAML files. Then:
   `branches.default: <main-branch-name>`, and
   `branches.flow: "feature → dev → stage → main"`.
 
-## 6. Commit convention preset
+## 7. Commit convention preset
 
 Do not ask "what commit style do you use?" in the abstract. Instead show the
 user the four named presets below, ask which one fits, and fill the whole
@@ -280,7 +298,7 @@ Write the user's answer verbatim into `commits.language`. For an existing
 project, first look at `git log` to estimate the dominant language and offer
 it as the default — but accept whatever the user says.
 
-## 7. Extending with new process features
+## 8. Extending with new process features
 
 The registry of customizable process features lives in
 `.workflow/presets.yml → features:`. To add a new customizable step to the

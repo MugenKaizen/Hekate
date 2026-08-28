@@ -5,9 +5,15 @@ source of truth for all AI agents. Read it in full before doing any work.
 
 For pre-flight, read only:
 
-- `.workflow/status.yml` — fast initialization check and resolved feature flags
+- `.workflow/status.yml` — Hekate switch/module allowlist, fast initialization
+  check, and resolved feature flags
 
-If `status.yml → initialized` is not `true`, `active_preset` is `null`, or
+Apply `status.yml → hekate` first. If `hekate.enabled` is false, do not apply
+the remaining Hekate rules. Workflow, history, native subagents, and external
+orchestration each run only when their `hekate.modules` value is true. Missing
+module keys mean true for compatibility with older installations.
+
+If the workflow module is enabled and `status.yml → initialized` is not `true`, `active_preset` is `null`, or
 any `checks.*` value is not `true` — **do not start work**. Run
 `/init-workflow` or perform/refresh the procedure from `.workflow/bootstrap.md`.
 
@@ -18,7 +24,7 @@ stack, architecture, conventions, full workflow rules, or preset definitions.
 For large tasks, check whether `status.yml → features.granular_commits`
 requires a checkpoint checklist and intermediate commits in `.workflow/history/`.
 
-Before using native Claude subagents, apply `AGENTS.md → Native-subagent session
+When the native-subagents module is enabled, before using native Claude subagents, apply `AGENTS.md → Native-subagent session
 policy` from `.workflow/session.local.yml`: `off`, `ask`, or `auto`. Missing or
 invalid mode means `ask`; in `ask`, one user approval covers only the exact
 proposed delegation wave.
@@ -30,7 +36,8 @@ Slash commands for convenience:
 - `/plan` — produce a plan (stage 3.3)
 - `/harness` — start or manage a long-running job in another configured CLI harness
 
-When `.workflow/status.yml → orchestration.enabled` is true, this user-facing
+When both `.workflow/status.yml → hekate.modules.orchestration` and
+`orchestration.enabled` are true, this user-facing
 Claude session remains the primary harness and exclusively owns architecture,
 decomposition, routing, subagent/harness orchestration, review, and final
 verification. Prefer `.workflow/bin/hekate-agent` over ad-hoc nested CLI

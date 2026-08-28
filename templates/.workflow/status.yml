@@ -11,6 +11,16 @@ checks:
   required_files_present: false
   required_fields_filled: false
 
+hekate:
+  # One switch for all Hekate behavior. When false, agents stop here and use
+  # only their native/default behavior.
+  enabled: true
+  modules:
+    workflow: true
+    history: true
+    native_subagents: true
+    orchestration: true
+
 features:
   require_analysis: true
   require_plan: true
@@ -41,7 +51,7 @@ lazy_load:
   workflow_rules: .workflow/workflow.yml # when a process detail is missing from this file
   presets: .workflow/presets.yml # only during initialization or preset changes
   bootstrap: .workflow/bootstrap.md # only when pre-flight fails or /init-workflow is requested
-  orchestration: .workflow/orchestration.yml # only when orchestration.enabled and task needs routing
+  orchestration: .workflow/orchestration.yml # only when its module and orchestration.enabled are true
   delegation: .workflow/delegation.md # only when actually delegating to an external CLI harness
   subagents: .workflow/subagents.md # only before the first native-subagent wave, or to change policy
   history_format: .workflow/history-format.md # only when creating/updating a task history entry
@@ -59,5 +69,5 @@ required_non_empty_fields:
   conventions.yml: [code_style.formatter, naming.files, commits.style]
 
 notes:
-  - "If initialized is not true, active_preset is null, or any check is false, read .workflow/bootstrap.md."
+  - "When the workflow module is enabled: if initialized is not true, active_preset is null, or any check is false, read .workflow/bootstrap.md."
   - "Do not read stack/architecture/conventions/workflow/presets at startup unless the fast check fails."

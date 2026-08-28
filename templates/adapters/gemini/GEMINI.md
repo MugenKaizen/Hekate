@@ -5,9 +5,11 @@ source of truth for all AI agents. Read it in full before doing any work.
 
 For pre-flight, read only:
 
-- `.workflow/status.yml` — fast initialization check and resolved feature flags
+- `.workflow/status.yml` — Hekate switch/module allowlist, fast initialization
+  check, and resolved feature flags
 
-If `status.yml → initialized` is not `true`, `active_preset` is `null`, or
+Apply `status.yml → hekate` first. If Hekate is disabled, stop applying its
+rules. If the workflow module is enabled and `status.yml → initialized` is not `true`, `active_preset` is `null`, or
 any `checks.*` value is not `true` — **do not start work**. Perform (or
 refresh) the Bootstrap procedure from `.workflow/bootstrap.md`.
 

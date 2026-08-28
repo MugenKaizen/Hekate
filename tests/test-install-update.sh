@@ -46,7 +46,13 @@ grep -qxF '    - 003-add-cross-harness-orchestration' "$PROJECT/.workflow/state.
 grep -qxF '    - 004-add-routing-profiles' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 005-add-session-subagent-policy' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 006-relocate-agent-skills' "$PROJECT/.workflow/state.yml"
+grep -qxF '    - 009-add-module-switches' "$PROJECT/.workflow/state.yml"
 grep -qxF "  installed_ref: $FULL_COMMIT" "$PROJECT/.workflow/state.yml"
+grep -qxF 'hekate:' "$PROJECT/.workflow/status.yml"
+grep -qxF '    workflow: true' "$PROJECT/.workflow/status.yml"
+grep -qxF '    history: true' "$PROJECT/.workflow/status.yml"
+grep -qxF '    native_subagents: true' "$PROJECT/.workflow/status.yml"
+grep -qxF '    orchestration: true' "$PROJECT/.workflow/status.yml"
 
 # A fresh install lays down the lazily-loaded docs AGENTS.md now references.
 [ -f "$PROJECT/.workflow/delegation.md" ]
@@ -214,6 +220,42 @@ TARGET="$SESSION_PROJECT" RUNNER_ROOT="$ROOT" TMP_ROOT="$TMP/session-work" \
   BACKUP_ROOT="$SESSION_PROJECT/.workflow/backups" BACKED_UP_LIST_FILE="$TMP/session-work/backed.txt" \
   DRY_RUN=0 sh "$ROOT/migrations/005-add-session-subagent-policy.sh" >/dev/null
 grep -qxF '  mode: auto' "$SESSION_PROJECT/.workflow/session.local.yml"
+
+# Migration 009 adds all-enabled defaults without changing existing settings,
+# supports dry-run, and backs up both committed config files.
+MODULE_PROJECT="$TMP/module-project"
+mkdir -p "$MODULE_PROJECT/.workflow/backups" "$TMP/module-work"
+awk '
+  /^hekate:[[:space:]]*$/ { drop=1; next }
+  drop && /^  / { next }
+  drop { drop=0 }
+  { print }
+' "$ROOT/templates/.workflow/workflow.yml" > "$MODULE_PROJECT/.workflow/workflow.yml"
+awk '
+  /^hekate:[[:space:]]*$/ { drop=1; next }
+  drop && /^  / { next }
+  drop { drop=0 }
+  { print }
+' "$ROOT/templates/.workflow/status.yml" > "$MODULE_PROJECT/.workflow/status.yml"
+printf '\ncustom_setting: preserve-me\n' >> "$MODULE_PROJECT/.workflow/workflow.yml"
+cp "$MODULE_PROJECT/.workflow/workflow.yml" "$TMP/module-workflow.before"
+cp "$MODULE_PROJECT/.workflow/status.yml" "$TMP/module-status.before"
+: > "$TMP/module-work/backed.txt"
+TARGET="$MODULE_PROJECT" RUNNER_ROOT="$ROOT" TMP_ROOT="$TMP/module-work" \
+  BACKUP_ROOT="$MODULE_PROJECT/.workflow/backups" BACKED_UP_LIST_FILE="$TMP/module-work/backed.txt" \
+  DRY_RUN=1 sh "$ROOT/migrations/009-add-module-switches.sh" >/dev/null
+cmp -s "$TMP/module-workflow.before" "$MODULE_PROJECT/.workflow/workflow.yml"
+cmp -s "$TMP/module-status.before" "$MODULE_PROJECT/.workflow/status.yml"
+: > "$TMP/module-work/backed.txt"
+TARGET="$MODULE_PROJECT" RUNNER_ROOT="$ROOT" TMP_ROOT="$TMP/module-work" \
+  BACKUP_ROOT="$MODULE_PROJECT/.workflow/backups" BACKED_UP_LIST_FILE="$TMP/module-work/backed.txt" \
+  DRY_RUN=0 sh "$ROOT/migrations/009-add-module-switches.sh" >/dev/null
+grep -qxF 'hekate:' "$MODULE_PROJECT/.workflow/workflow.yml"
+grep -qxF 'hekate:' "$MODULE_PROJECT/.workflow/status.yml"
+grep -qxF '    workflow: true' "$MODULE_PROJECT/.workflow/workflow.yml"
+grep -qxF 'custom_setting: preserve-me' "$MODULE_PROJECT/.workflow/workflow.yml"
+[ -f "$MODULE_PROJECT/.workflow/backups/.workflow/workflow.yml" ]
+[ -f "$MODULE_PROJECT/.workflow/backups/.workflow/status.yml" ]
 
 # Migration 006 moves legacy Hekate skills for portable adapters, including
 # user edits, while dry-run remains read-only.

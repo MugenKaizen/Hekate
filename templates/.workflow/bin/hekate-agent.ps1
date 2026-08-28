@@ -33,12 +33,51 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..\..')).TrimEnd('\','/')
 $Config = Join-Path $ProjectRoot '.workflow\orchestration.yml'
 $LocalConfig = Join-Path $ProjectRoot '.workflow\orchestration.local.yml'
+$StatusConfig = Join-Path $ProjectRoot '.workflow\status.yml'
 if (-not (Test-Path -LiteralPath $Config)) { throw "hekate-agent: missing $Config" }
 
 function Fail([string]$Message) { throw "hekate-agent: $Message" }
 function Scalar([string]$Value) { if ($null -eq $Value) { return '' }; $v=$Value.Trim(); if (($v.StartsWith('"') -and $v.EndsWith('"')) -or ($v.StartsWith("'") -and $v.EndsWith("'"))) { return $v.Substring(1,$v.Length-2) }; return $v }
 function TopValueFrom([string]$File,[string]$Key) { if (-not (Test-Path -LiteralPath $File)) { return '' }; foreach($line in Get-Content -LiteralPath $File) { if($line -match ('^'+[regex]::Escape($Key)+':\s*(.*?)\s*(?:#.*)?$')) { return Scalar $matches[1] } }; return '' }
 function TopValue([string]$Key) { $v=TopValueFrom $LocalConfig $Key; if(-not $v){$v=TopValueFrom $Config $Key}; return $v }
+function DirectSectionRaw([string]$File,[string]$Section,[string]$Key) {
+    if (-not (Test-Path -LiteralPath $File)) { return $null }
+    $inside = $false; $keyIndent = -1
+    foreach ($line in Get-Content -LiteralPath $File) {
+        if ($line -match ('^' + [regex]::Escape($Section) + ':\s*$')) { $inside = $true; continue }
+        if (-not $inside -or $line -match '^\s*(?:#.*)?$') { continue }
+        if ($line -match '^\S') { break }
+        if ($line -notmatch '^(\s+)(.*)$') { continue }
+        $indent = $matches[1].Length; $content = $matches[2]
+        if ($keyIndent -lt 0) { $keyIndent = $indent }
+        if ($indent -eq $keyIndent -and $content -match ('^' + [regex]::Escape($Key) + ':\s*(.*?)\s*(?:#.*)?$')) {
+            return 'F:' + (Scalar $matches[1])
+        }
+    }
+    return $null
+}
+function DirectNestedRaw([string]$File,[string]$Section,[string]$Item,[string]$Key) {
+    if (-not (Test-Path -LiteralPath $File)) { return $null }
+    $inSection = $false; $inItem = $false; $itemIndent = -1; $keyIndent = -1
+    foreach ($line in Get-Content -LiteralPath $File) {
+        if ($line -match ('^' + [regex]::Escape($Section) + ':\s*$')) { $inSection = $true; continue }
+        if (-not $inSection -or $line -match '^\s*(?:#.*)?$') { continue }
+        if ($line -match '^\S') { break }
+        if ($line -notmatch '^(\s+)(.*)$') { continue }
+        $indent = $matches[1].Length; $content = $matches[2]
+        if (-not $inItem) {
+            if ($itemIndent -lt 0) { $itemIndent = $indent }
+            if ($indent -eq $itemIndent -and $content -eq ($Item + ':')) { $inItem = $true }
+            continue
+        }
+        if ($indent -le $itemIndent) { break }
+        if ($keyIndent -lt 0) { $keyIndent = $indent }
+        if ($indent -eq $keyIndent -and $content -match ('^' + [regex]::Escape($Key) + ':\s*(.*?)\s*(?:#.*)?$')) {
+            return 'F:' + (Scalar $matches[1])
+        }
+    }
+    return $null
+}
 function SectionNames([string]$File,[string]$Section) { if(-not(Test-Path -LiteralPath $File)){return};$inside=$false;foreach($line in Get-Content -LiteralPath $File){if($line-match('^'+[regex]::Escape($Section)+':\s*$')){$inside=$true;continue};if($inside-and$line-match'^\S'){break};if($inside-and$line-match'^  ([A-Za-z0-9_.-]+):\s*$'){$matches[1]}} }
 function HarnessNames { SectionNames $Config 'harnesses' }
 function ProfileNames { @(@((SectionNames $Config 'profiles')) + @((SectionNames $LocalConfig 'profiles'))) | Where-Object { $_ -notin @('none','null') } | Select-Object -Unique }
@@ -295,6 +334,10 @@ try {
                 }
             }
             if($profileExplicit-and$harnessExplicit){Fail 'use either --profile or --harness'}
+            $hekateEnabled=DirectSectionRaw $StatusConfig 'hekate' 'enabled'
+            if($hekateEnabled-and$hekateEnabled.Substring(2)-ne'true'){Fail 'Hekate is disabled in .workflow/status.yml'}
+            $orchestrationModule=DirectNestedRaw $StatusConfig 'hekate' 'modules' 'orchestration'
+            if($orchestrationModule-and$orchestrationModule.Substring(2)-ne'true'){Fail 'orchestration module is disabled in .workflow/status.yml'}
             if ((TopValue 'enabled') -ne 'true') { Fail 'orchestration disabled; run config use <harness>' }
             if ($task -and $taskFile) { Fail 'use only one task source' }
             if (-not $task -and -not $taskFile) { Fail 'run requires --task or --task-file' }

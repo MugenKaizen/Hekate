@@ -8,7 +8,9 @@ $ARGUMENTS
 
 What to do:
 
-1. Make sure the fast pre-flight check in `.workflow/status.yml` has passed.
+1. Make sure neither `hekate.enabled` nor `hekate.modules.workflow` is
+   explicitly false, then make
+   sure the fast pre-flight check in `.workflow/status.yml` has passed.
    If not, stop and run `/init-workflow`.
 2. Understand the goal of the task. If it is unclear, ask clarifying
    questions **before** the analysis.
