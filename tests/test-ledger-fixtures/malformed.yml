@@ -1,0 +1,9 @@
+schema:
+  state_version: 2
+  applied_migrations:
+    - 001-add-three-branch-model
+    - {ran_at: "legacy-pollution"}
+      - deeper-not-an-item
+    - 002-add-status-index
+  applied_migrations_backup:
+    - not-a-migration

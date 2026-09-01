@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:operation-journal:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "transaction_id", "status", "manifest_version", "source_release", "target_release", "operations"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "transaction_id": {"type": "string", "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16}$"},
+    "status": {"enum": ["planned", "applying", "committed", "failed", "rolling_back", "rolled_back", "rollback_conflict"]},
+    "manifest_version": {"type": "integer", "minimum": 1},
+    "source_release": {"type": ["string", "null"]},
+    "target_release": {"type": "string", "minLength": 1},
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation", "path", "before_hash", "after_hash", "backup_path", "ownership"],
+        "properties": {
+          "operation": {"enum": ["create", "replace", "delete", "merge"]},
+          "path": {"type": "string", "minLength": 1},
+          "before_hash": {"anyOf": [{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, {"type": "null"}]},
+          "after_hash": {"anyOf": [{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, {"type": "null"}]},
+          "backup_path": {"type": ["string", "null"]},
+          "ownership": {"enum": ["template-managed", "project-seed", "local-seed", "generated", "shared-merge", "user-owned"]}
+        }
+      }
+    }
+  }
+}

@@ -9,12 +9,23 @@ Thumbs.db
 *.swo
 *~
 
+# npm/Bun workspace dependencies
+node_modules/
+
 # Local workflow state (if the tool is used inside its own repo)
 /.workflow/history/
 /.workflow/backups/
+/.workflow/migration/
+/.workflow/transactions/
+/.workflow/update.lock
 /.workflow/runs/
 /.workflow/orchestration.local.yml
 /.workflow/session.local.yml
 
 # Agent session transcripts dropped in the working tree by external tools
 /session-*.md
+/session-export-*.zip
+/hekate-subagents.json
+
+# Generated only for npm package assembly
+/packages/cli/payload/

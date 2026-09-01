@@ -1,0 +1,455 @@
+# Cross-harness delegation. This file is project configuration and may be committed.
+# Personal choices made by `hekate-agent config use` are written to the
+# gitignored `.workflow/orchestration.local.yml`.
+#
+# Arguments are executed directly, never through `sh -c`/`eval`. Supported
+# placeholders: {model}, {effort}, {prompt_file}, {session_id}, {cwd}.
+#
+# =============================================================================
+# RISK: a delegated child harness runs as an unattended background process in
+# YOUR checkout. Every `args:` vector below is a real, version-sensitive CLI
+# invocation copy-pasted from vendor docs/source at the time of writing (see
+# per-harness "Verified" / "Unverified" comments and sources). CLIs change
+# their non-interactive flags across releases without warning; a wrong or
+# renamed flag is normally only discovered when a delegated job has already
+# failed or, worse, silently ran with the wrong permissions.
+#
+# MANDATORY: after upgrading any harness CLI, run `hekate-agent doctor` (and a
+# smoke test with `run --harness <name> --task "echo test"`) and re-check this
+# file's `args:` against the harness's current `--help` / changelog before
+# trusting it again. Do not assume a flag that worked last month still exists.
+#
+# PAIRED ENTRIES, NOT COMMENTED-OUT FLAGS: write access is a property of the
+# TASK, not the project. "Review this diff" must be read-only; "implement the
+# approved plan" is useless without writes. Instead of one entry per CLI with
+# a bypass flag hidden behind a comment, most CLIs below ship as TWO enabled
+# harness entries pointing at the same executable:
+#
+#   <name>        — advisory/read-only: research, review, propose a plan,
+#                   never edits files. Safe as a default for any profile.
+#   <name>-write  — the SAFEST flag vector that actually enables unattended
+#                   edits for that CLI (never the most-permissive/bypass-all
+#                   flag). Route a profile to `<name>-write` only for tasks
+#                   that are explicitly meant to write, e.g. "implement".
+#
+# A `<name>-write` entry writes to the checkout UNATTENDED. Never run it in
+# the same worktree as another writer (primary session included) — give it a
+# dedicated git worktree. The primary harness still owns diff review and
+# final verification for everything a `-write` entry produces, exactly as it
+# does for the advisory entries. `pi` has no permission gate of any kind (see
+# its entry below) and therefore has no `pi-write` twin — plain `pi` already
+# writes unattended and must always get its own worktree.
+# =============================================================================
+
+schema_version: 2
+enabled: false
+default_harness: pi
+# Optional named routing profile. `null` falls back to default_harness.
+default_profile: null
+jobs_dir: .workflow/runs
+# Keep this false. A delegated child is restricted to the project root unless
+# a team deliberately and explicitly opts out here. Do not flip this to make
+# an unattended run "just work" — widen scope per task instead.
+allow_external_cwd: false
+
+# Arbitrary named profiles are selected with `run --profile <name>` or locally
+# with `config use-profile <name>`. They may represent complexity, role, risk,
+# cost, provider, or another team policy; `none` and `null` are reserved. The
+# primary workflow, not this runner or a delegated child, selects routing.
+# Example values are configured during initialization so committed defaults
+# match models actually available to the team.
+#
+# The example below demonstrates the intended pattern: route advisory work
+# (review/research — never writes) and writer work (implement — writes
+# unattended, needs its own worktree) to different harness entries. Adapt the
+# harness/model choices; keep the advisory-vs-writer split.
+profiles:
+  # review:
+  #   harness: claude          # advisory: plan mode, never edits
+  #   model: sonnet
+  #   effort: high
+  # research:
+  #   harness: codex            # advisory: read-only sandbox, never edits
+  #   model: gpt-5.4
+  #   effort: high
+  # implement:
+  #   harness: claude-write     # writer: acceptEdits, edits files unattended
+  #   model: sonnet             # — dedicate a worktree before using this profile
+  #   effort: high
+  #
+  # A complexity-oriented set (all advisory) also works if the team never
+  # wants unattended writes at all:
+  # small:
+  #   harness: pi
+  #   model: openai-codex/gpt-5.6-terra
+  #   effort: high
+  # medium:
+  #   harness: pi
+  #   model: openai-codex/gpt-5.6-sol
+  #   effort: medium
+  # complex:
+  #   harness: pi
+  #   model: openai-codex/gpt-5.6-sol
+  #   effort: high
+
+harnesses:
+  # ---------------------------------------------------------------------------
+  # Claude Code CLI
+  # Verified 2026-08 against code.claude.com/docs/en/permission-modes and
+  # code.claude.com/docs/en/headless (`claude -p ...`).
+  # Valid --permission-mode values: default (alias "manual"), acceptEdits,
+  # plan, auto, dontAsk, bypassPermissions. "auto" IS a real value, but it
+  # means "a classifier reviews each action", not "unattended full access".
+  # min_cli_version: `manual` alias and `dontAsk`/`auto` require Claude Code
+  # v2.1.200+ ; built-in `auto` starting mode requires v2.1.228+ (macOS/Linux/
+  # WSL) or v2.1.233+ (native Windows). Re-verify with `claude --help` after
+  # upgrading.
+  claude:
+    enabled: true
+    command: claude
+    prompt_delivery: stdin
+    supports_model: true
+    supports_effort: true
+    default_model: sonnet
+    default_effort: high
+    models_command: claude
+    models_args:
+      - --help
+    args:
+      - -p
+      - --model
+      - "{model}"
+      # UNVERIFIED / KNOWN BUGGY: --effort is a real, documented flag, but
+      # anthropics/claude-code#41028 reports the CLI value is parsed and
+      # validated yet silently dropped from the API request (server default
+      # is used instead; independently confirmed against the GitHub issue).
+      # Left in place because it is at worst a no-op, not a wrong flag. If
+      # you need a guaranteed effort level, set CLAUDE_CODE_EFFORT_LEVEL in
+      # the child process environment instead (not expressible in this argv
+      # registry today).
+      - --effort
+      - "{effort}"
+      # Advisory/read-only: research + propose only, never edits files.
+      # Because -p is one-shot with no human to approve a plan, `plan` mode
+      # in headless runs is effectively fully read-only/advisory.
+      - --permission-mode
+      - plan
+      - --output-format
+      - text
+      #
+      # UNVERIFIED / FRAGILE — deliberately NOT shipped as a default:
+      # --no-session-persistence exists in some releases but has been
+      # reported removed entirely (unknown option error), a no-op, and cause
+      # of a frozen/no-output run across different Claude Code versions
+      # (anthropics/claude-code#20398, #49565, #36521, #52555; #20398
+      # independently confirmed against the GitHub issue). Confirm it still
+      # works on your installed version with a smoke test before adding it;
+      # an unrecognized flag will hard-fail every delegated run.
+
+  # WRITER TWIN of `claude`. Edits files in the checkout UNATTENDED — no
+  # per-edit confirmation. Route only tasks that are explicitly meant to
+  # write (e.g. "implement the approved plan") to this entry, and only from
+  # a dedicated git worktree (never the primary session's checkout). The
+  # primary harness still owns diff review and final verification.
+  # Uses `acceptEdits`, NOT `bypassPermissions` — the safest mode that still
+  # auto-approves file edits + common in-scope filesystem commands, while
+  # everything outside cwd/protected paths and all other Bash commands still
+  # prompt (and therefore fail closed in a non-interactive run instead of
+  # silently succeeding).
+  claude-write:
+    enabled: true
+    command: claude
+    prompt_delivery: stdin
+    supports_model: true
+    supports_effort: true
+    default_model: sonnet
+    default_effort: high
+    models_command: claude
+    models_args:
+      - --help
+    args:
+      - -p
+      - --model
+      - "{model}"
+      - --effort
+      - "{effort}"
+      - --permission-mode
+      - acceptEdits
+      - --output-format
+      - text
+
+  # ---------------------------------------------------------------------------
+  # pi (earendil-works/pi coding agent). Confirmed via the project's own
+  # README/usage docs and source (badlogic/pi-mono, earendil-works/pi) — this
+  # is a niche CLI without a stable vendor documentation site, so treat the
+  # whole entry as MORE version-fragile than the mainstream harnesses above.
+  # pi documents itself as intentionally having "no permission popups, no
+  # plan mode" — i.e. IT HAS NO BUILT-IN APPROVAL/SANDBOX GATE AT ALL. There
+  # is no advisory/read-only vector to ship and therefore no `pi-write` twin
+  # either: plain `pi` already writes, unconditionally, the moment it runs.
+  # Never delegate to `pi` against a checkout you are not willing to have
+  # written to; always give it a dedicated git worktree (see "Keep one writer
+  # per checkout" in docs/orchestration.md).
+  # min_cli_version: unverified; re-check `pi --help` every upgrade.
+  pi:
+    enabled: true
+    command: pi
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: true
+    default_model: anthropic/claude-sonnet-4-5
+    default_effort: high
+    models_command: pi
+    models_args:
+      - --list-models
+    args:
+      - -p
+      - --no-session
+      - --model
+      - "{model}"
+      - --thinking
+      - "{effort}"
+
+  # ---------------------------------------------------------------------------
+  # OpenCode CLI. Verified 2026-08 against opencode.ai/docs/cli and
+  # opencode.ai/docs/permissions.
+  # The built-in "plan" agent is restricted-by-design (research/propose, does
+  # not edit) and is selectable with `--agent`. The built-in "build" agent
+  # auto-approves most tools (edit/bash default to "allow" unless a project's
+  # opencode.json overrides them) — that is the writer twin below, not this
+  # entry.
+  # min_cli_version: `--agent` and `--variant` are current per opencode.ai
+  # docs as of 2026-08; unverified for older releases.
+  opencode:
+    enabled: true
+    command: opencode
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: true
+    default_model: anthropic/claude-sonnet-4-5
+    default_effort: high
+    models_command: opencode
+    models_args:
+      - models
+    args:
+      - run
+      - --model
+      - "{model}"
+      - --variant
+      - "{effort}"
+      # Advisory/read-only built-in agent: research/propose, does not edit.
+      - --agent
+      - plan
+
+  # WRITER TWIN of `opencode`. Edits files in the checkout UNATTENDED — the
+  # built-in "build" agent auto-approves edit/bash by default. Route only
+  # tasks that are explicitly meant to write to this entry, and only from a
+  # dedicated git worktree. The primary harness still owns diff review and
+  # final verification. Deliberately does NOT use `--auto` (auto-approve
+  # everything not explicitly denied, including bash) — "build" with its own
+  # default permissions is the safer of the two documented writer paths.
+  opencode-write:
+    enabled: true
+    command: opencode
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: true
+    default_model: anthropic/claude-sonnet-4-5
+    default_effort: high
+    models_command: opencode
+    models_args:
+      - models
+    args:
+      - run
+      - --model
+      - "{model}"
+      - --variant
+      - "{effort}"
+      - --agent
+      - build
+
+  # ---------------------------------------------------------------------------
+  # Codex CLI (OpenAI). Verified 2026-08 against developers.openai.com/codex
+  # (non-interactive mode, agent-approvals-security) and current `codex exec
+  # --help` behavior.
+  # `--full-auto` is DEPRECATED (warns as of v0.128.0) and REMOVED as of
+  # v0.147.0 — a script still passing it on a current install errors instead
+  # of running. Replaced everywhere with the documented, currently-supported
+  # `--sandbox` / `--ask-for-approval` pair.
+  # min_cli_version: `--sandbox`/`--ask-for-approval` are current; `--full-auto`
+  # is gone as of v0.147.0. Re-check `codex exec --help` after upgrading.
+  codex:
+    enabled: true
+    command: codex
+    prompt_delivery: stdin
+    supports_model: true
+    supports_effort: true
+    default_model: gpt-5.4
+    default_effort: high
+    models_command: codex
+    models_args:
+      - --help
+    args:
+      - exec
+      - --model
+      - "{model}"
+      - --config
+      - "model_reasoning_effort={effort}"
+      # Advisory/read-only sandbox: model-generated commands can read but
+      # cannot write anywhere, including temp dirs. This is codex exec's
+      # documented default even without the flag; kept explicit here so the
+      # intent survives a future default change upstream.
+      - --sandbox
+      - read-only
+      # Non-interactive: never wait for an approval that can't be answered.
+      # Safe to pair with read-only, since nothing escalatable can happen.
+      - --ask-for-approval
+      - never
+      - -
+
+  # WRITER TWIN of `codex`. Edits files in the checkout UNATTENDED. Route
+  # only tasks that are explicitly meant to write to this entry, and only
+  # from a dedicated git worktree. The primary harness still owns diff review
+  # and final verification. Uses `--sandbox workspace-write`, NOT
+  # `--dangerously-bypass-approvals-and-sandbox` — writes are still confined
+  # to the current repo + temp dirs, never the wider filesystem.
+  codex-write:
+    enabled: true
+    command: codex
+    prompt_delivery: stdin
+    supports_model: true
+    supports_effort: true
+    default_model: gpt-5.4
+    default_effort: high
+    models_command: codex
+    models_args:
+      - --help
+    args:
+      - exec
+      - --model
+      - "{model}"
+      - --config
+      - "model_reasoning_effort={effort}"
+      - --sandbox
+      - workspace-write
+      # "on-failure" only prompts when a workspace-write command fails; that
+      # prompt has no effect in a headless job (nothing can answer it), so a
+      # failing command simply fails the job rather than silently escalating.
+      - --ask-for-approval
+      - on-failure
+      - -
+
+  # ---------------------------------------------------------------------------
+  # Gemini CLI (Google). Verified 2026-08 against
+  # google-gemini.github.io/gemini-cli/docs/cli/settings.md and
+  # geminicli.com/docs/reference/configuration.
+  # Valid --approval-mode values: default, auto_edit, yolo (plus an
+  # experimental, not-fully-functional `plan`). Omitting --approval-mode (the
+  # "default" mode) is the least-privileged choice for headless runs: any
+  # tool call that would need interactive confirmation is excluded from what
+  # the model can call at all, so a non-interactive `default`-mode run cannot
+  # edit files or run un-preapproved shell commands.
+  # min_cli_version: --approval-mode replaces the older --yolo boolean (PR
+  # google-gemini/gemini-cli#4591); the two flags are mutually exclusive.
+  # Re-check `gemini --help` after upgrading — see gemini-cli#13792 for an
+  # open, version-dependent interaction bug between --yolo and --approval-mode.
+  gemini:
+    enabled: true
+    command: gemini
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: false
+    default_model: gemini-2.5-pro
+    default_effort: default
+    models_command: gemini
+    models_args:
+      - --help
+    args:
+      - --model
+      - "{model}"
+      # Advisory/read-only: no --approval-mode flag == "default" mode.
+      - --prompt
+
+  # WRITER TWIN of `gemini`. Edits files in the checkout UNATTENDED —
+  # `auto_edit` auto-approves edit tools (replace/write_file) while still
+  # prompting for shell commands, which then fail closed in a non-interactive
+  # run instead of executing. Route only tasks that are explicitly meant to
+  # write to this entry, and only from a dedicated git worktree. Deliberately
+  # does NOT use `yolo` (auto-approves everything, including shell) — that is
+  # the most-permissive mode, not the safest writer mode. Both `auto_edit`
+  # and `yolo` additionally require a trusted workspace or Gemini CLI refuses
+  # to start.
+  gemini-write:
+    enabled: true
+    command: gemini
+    prompt_delivery: argument
+    supports_model: true
+    supports_effort: false
+    default_model: gemini-2.5-pro
+    default_effort: default
+    models_command: gemini
+    models_args:
+      - --help
+    args:
+      - --model
+      - "{model}"
+      - --approval-mode
+      - auto_edit
+      - --prompt
+
+  # ---------------------------------------------------------------------------
+  # Aider. Verified 2026-08 against aider.chat/docs/usage/modes.html and
+  # aider.chat/docs/scripting.html.
+  # Chat modes: `code` (default; edits files directly), `ask` (discuss only,
+  # never edits), `architect` (two-model propose/edit split). `--chat-mode
+  # ask` is Aider's documented discussion-only mode and never writes files.
+  # min_cli_version: unverified; --chat-mode/--yes-always/--message-file are
+  # long-standing stable flags with no known version gating found during this
+  # review, but re-check `aider --help` after upgrading regardless.
+  aider:
+    enabled: true
+    command: aider
+    prompt_delivery: file
+    supports_model: true
+    supports_effort: false
+    default_model: sonnet
+    default_effort: default
+    models_command: aider
+    models_args:
+      - --list-models
+    args:
+      - --model
+      - "{model}"
+      # Advisory/read-only: discuss/propose only, never edits files.
+      - --chat-mode
+      - ask
+      - --message-file
+      - "{prompt_file}"
+
+  # WRITER TWIN of `aider`. Edits files in the checkout UNATTENDED —
+  # `code` chat mode (Aider's default) plus `--yes-always` to auto-confirm
+  # every prompt, including "apply this edit?". Route only tasks that are
+  # explicitly meant to write to this entry, and only from a dedicated git
+  # worktree. Aider has no middle ground narrower than this between "ask
+  # every time" and "confirm everything automatically" — there is no
+  # separate sandbox/scope flag to layer on top, so this is already the
+  # safest available writer vector for this CLI.
+  aider-write:
+    enabled: true
+    command: aider
+    prompt_delivery: file
+    supports_model: true
+    supports_effort: false
+    default_model: sonnet
+    default_effort: default
+    models_command: aider
+    models_args:
+      - --list-models
+    args:
+      - --model
+      - "{model}"
+      - --chat-mode
+      - code
+      - --yes-always
+      - --message-file
+      - "{prompt_file}"

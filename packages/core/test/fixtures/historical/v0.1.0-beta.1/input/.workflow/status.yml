@@ -1,0 +1,52 @@
+# Fast pre-flight index for AI agents.
+# Read this file at session start instead of loading every .workflow/*.yml.
+# It is rewritten after /init-workflow or after deliberate workflow config edits.
+
+schema_version: 1
+
+initialized: false
+active_preset: null
+
+checks:
+  required_files_present: false
+  required_fields_filled: false
+
+features:
+  require_analysis: true
+  require_plan: true
+  require_options: true
+  light_tdd: true
+  granular_commits: true
+  scope_control: true
+  three_branch_model: false
+
+orchestration:
+  enabled: false
+  default_harness: pi
+  config: .workflow/orchestration.yml
+  runner: .workflow/bin/hekate-agent
+
+lazy_load:
+  stack: .workflow/stack.yml
+  architecture: .workflow/architecture.yml
+  conventions: .workflow/conventions.yml
+  workflow_rules: .workflow/workflow.yml
+  presets: .workflow/presets.yml
+  bootstrap: .workflow/bootstrap.md
+  orchestration: .workflow/orchestration.yml
+
+required_files:
+  - .workflow/stack.yml
+  - .workflow/architecture.yml
+  - .workflow/conventions.yml
+  - .workflow/workflow.yml
+  - .workflow/presets.yml
+
+required_non_empty_fields:
+  stack.yml: [meta.project_name, meta.project_kind, languages]
+  architecture.yml: [style, layers]
+  conventions.yml: [code_style.formatter, naming.files, commits.style]
+
+notes:
+  - "If initialized is not true, active_preset is null, or any check is false, read .workflow/bootstrap.md."
+  - "Do not read stack/architecture/conventions/workflow/presets at startup unless the fast check fails."

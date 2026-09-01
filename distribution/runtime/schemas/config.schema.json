@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:config:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "hekate", "workflow", "policy", "enforcement", "extensions"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "hekate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "profile", "overrides"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "profile": { "enum": ["fast", "medium", "full", "custom"] },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tdd": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode"],
+              "properties": { "mode": { "enum": ["off", "prefer-test-first", "require-test-evidence"] } }
+            },
+            "history": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            }
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_consent", "destructive_actions", "dependency_changes"],
+      "properties": {
+        "commit_consent": { "const": "explicit-request-only" },
+        "destructive_actions": { "const": "explicit-consent" },
+        "dependency_changes": { "const": "explicit-consent" }
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configuration", "destructive_actions", "dependency_changes", "generated_lock"],
+      "properties": {
+        "configuration": { "const": "block" },
+        "destructive_actions": { "const": "confirm" },
+        "dependency_changes": { "const": "confirm" },
+        "generated_lock": { "const": "protect" }
+      }
+    },
+    "extensions": { "$ref": "#/$defs/extensions" }
+  },
+  "$defs": {
+    "extensions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+$" }
+    }
+  }
+}

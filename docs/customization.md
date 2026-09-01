@@ -1,236 +1,83 @@
 # Customization
 
-The workflow is designed to be easy to extend for a specific project or
-team.
+Hekate separates project facts from workflow guidance. Keep harness adapters
+thin and make each setting authoritative in one authored location.
 
-## Levels of change
+## Project Context
 
-### 1. Filling in the YAML (the common case)
+Edit these files for project-specific facts:
 
-Just fill out `.workflow/*.yml` for your stack. No need to fork anything.
-The agent reads `.workflow/status.yml` every session and lazy-loads detailed
-YAML only when a task needs it. If you change initialization status, required
-fields, active preset, or resolved feature flags, update `status.yml` too.
+- `.workflow/stack.yml`: languages, runtimes, frameworks, dependencies, and
+  verification commands;
+- `.workflow/architecture.yml`: modules, layers, boundaries, and dependency
+  constraints;
+- `.workflow/conventions.yml`: code, tests, documentation, naming, branches,
+  and commit-message conventions.
 
-### 2. Adding fields to the YAML
+Unknown extension keys are allowed in legacy `0.x` files and must be preserved
+by updates. Fields that should block initialized work belong under
+`workflow.yml -> blocking.required_non_empty_fields` until the v1 schemas
+replace this legacy structure.
 
-If you need fields that are not in the template (for example, special
-environments or your company's security policies) — just add them. The
-agent does not complain about "extra" keys.
+## Workflow Guidance
 
-### 2a. Enabling only selected Hekate modules
+`.workflow/workflow.yml` is the sole current owner of:
 
-The master switch and module allowlist live in both `workflow.yml` and the
-fast startup index `status.yml`. Keep the two copies synchronized.
+- `hekate.enabled` and the workflow module;
+- TDD mode: `off`, `prefer-test-first`, or `require-test-evidence`;
+- optional local history;
+- commit consent and scope-control policy.
 
-Disable Hekate completely:
+Profiles in `.workflow/presets.yml` tune only those settings. They do not
+authorize commits, branch creation, native subagents, or external delegation.
 
-```yaml
-hekate:
-  enabled: false
-```
+The uninitialized template values match the `medium` profile: prefer test-first
+where practical and leave history disabled. No profile is selected until
+bootstrap writes `workflow.yml -> meta.profile`. Use `full` when observed test
+evidence is required and local resumable notes are useful. Use `custom` to
+answer the registry questions directly.
 
-Keep only local task history and native subagents:
+After deliberate legacy config changes, refresh `.workflow/status.yml` as a
+validation-result index only. It must not copy enablement, TDD, history,
+profile, or commit policy. Do not set `initialized: true` unless required files
+and fields were actually validated. Phase 2 replaces this index with generated
+`status.lock.json`.
 
-```yaml
-hekate:
-  enabled: true
-  modules:
-    workflow: false
-    history: true
-    native_subagents: true
-    orchestration: false
-```
+## Optional History
 
-The modules are independent. Disabling `workflow` bypasses initialization,
-presets, stages, TDD, granular commits, and process feature flags. History can
-still record work without imposing workflow stages. Native subagents still
-obey `.workflow/session.local.yml → subagents.mode`; enabling the module never
-implicitly selects `auto`. External jobs additionally require
-`.workflow/orchestration.yml → enabled: true`.
+History is local and disabled by default. When enabled, use one concise note
+for resumable work. There is no required file for every task and no mandatory
+per-stage JSONL event stream. Durable decisions belong in project docs or ADRs.
 
-Run `/init-workflow` to choose `all`, `history + subagents`, `off`, or a custom
-module allowlist interactively. A missing switch/module key is treated as
-enabled so installations from older Hekate versions retain their behavior.
+## Native Subagents
 
-For fields that should **block work** when empty, add them to
-`workflow.yml → blocking.required_non_empty_fields` and mirror the check in
-`.workflow/status.yml`:
+Native subagent discovery, permission, consent, concurrency, cancellation, and
+results belong to the active harness. Do not add a portable `off | ask | auto`
+authorization layer. If native delegation is unavailable or declined, continue
+in the primary session without automatic external fallback.
 
-```yaml
-blocking:
-  required_non_empty_fields:
-    stack.yml: [meta.project_name, meta.project_kind, languages]
-    my_custom.yml: [security.data_classification]
-```
+## Adapters
 
-### 2b. Adding a new customizable process feature
+An adapter should point to root `AGENTS.md` and add only harness-specific
+loading instructions. Portable skills live under
+`templates/skills/<name>/SKILL.md` and are installed to the harness's standard
+skill directory. Do not duplicate the task contract in adapter files.
 
-The workflow comes with three presets — **fast**, **medium**, **full** —
-plus a **custom** mode where the user toggles each feature individually.
-The list of features is declared in `.workflow/presets.yml → features:`.
+Existing harness settings are user-owned unless Hekate has installation
+provenance for the exact asset. See [`install-ownership.md`](install-ownership.md)
+for current `0.x` behavior and known exceptions.
 
-To add a new process feature (say, `security_review` or
-`architecture_diff`):
+## Legacy External Orchestration
 
-1. Append an entry to `features:` in `.workflow/presets.yml`:
-
-   ```yaml
-   - id: security_review
-     description: "Mandatory security review before Execute stage."
-     controls:
-       - "workflow.yml → process.security_review.enabled"
-     question: "Require a security review before implementation?"
-     defaults: { fast: false, medium: false, full: true }
-   ```
-
-2. If the feature needs runtime settings, add the matching block to
-   `workflow.yml` under the path in `controls`.
-3. Optionally reference the new feature in `AGENTS.md` §3 so the agent
-   knows when to run it during the task cycle.
-4. If normal task routing needs the resolved value, add it to
-   `.workflow/status.yml → features` so startup stays cheap.
-
-That's it — `/init-workflow` iterates the feature registry, so the new
-feature automatically appears in both the preset application step and the
-custom-mode interview. You do **not** need to touch `AGENTS.md`,
-`init-workflow.md`, or any adapter file. Update `.workflow/bootstrap.md`
-only if the initialization procedure itself changes.
-
-### 3. Custom adapters for agents
-
-If your agent is not on the list (Aider, Gemini CLI, Continue, Windsurf…),
-create a file for it that points to `AGENTS.md`:
-
-- **Aider**: add `read: [AGENTS.md, .workflow/status.yml]` to `.aider.conf.yml`.
-- **Continue**: in `.continue/config.json`, set a system prompt that
-  references `AGENTS.md`.
-- **Windsurf / Gemini CLI**: usually read `AGENTS.md` out of the box.
-
-You can put your own adapter into a fork of this repo under
-`templates/adapters/<agent>/` and extend `install.sh` with a `has_agent`
-section.
-
-### 3a. Agent Skills
-
-Portable skills live in `templates/skills/<name>/SKILL.md`. Keep their
-frontmatter limited to fields from the Agent Skills standard. The installers
-deploy the same source to `.claude/skills/` for Claude Code and to
-`.agents/skills/` for Cursor and Codex.
-
-Do not put portable skills under `templates/adapters/`. Harness-specific
-commands, subagents, hooks, and settings remain in their adapter because their
-paths and schemas are not portable.
-
-### 3b. Native-subagent session policy
-
-`.workflow/session.local.yml` is gitignored and controls whether the primary
-harness may use its native subagents:
-
-```yaml
-subagents:
-  mode: ask  # off | ask | auto
-```
-
-`ask` is the safe default and requires one user approval for each exact proposed
-wave, not one prompt per child. Missing or invalid mode also means `ask`. Only
-an explicit user choice may enable `auto`; it does not grant push, merge,
-release, destructive, or recursive-delegation authority.
-
-### 3c. Adding or changing a CLI harness
-
-Cross-harness delegation is declarative in `.workflow/orchestration.yml`.
-Every registry entry specifies an executable, separate argv items, prompt
-transport (`stdin`, `argument`, or `file`), model/effort capabilities, and
-project defaults. The runner is generic; adding a harness does not require a
-pairwise adapter or code change.
-
-Supported safe placeholders in argv items are `{model}`, `{effort}`,
-`{prompt_file}`, `{session_id}`, and `{cwd}`. Commands are spawned directly,
-without `eval` or a shell. Example:
-
-```yaml
-harnesses:
-  my-agent:
-    enabled: true
-    command: my-agent
-    prompt_delivery: stdin
-    supports_model: true
-    supports_effort: false
-    default_model: vendor/model
-    default_effort: default
-    args:
-      - "run"
-      - "--model"
-      - "{model}"
-```
-
-For the complete lifecycle, safety model, built-in harness matrix, and
-troubleshooting, see [`docs/orchestration.md`](orchestration.md).
-
-Named `profiles:` can map arbitrary routing policies (complexity, role, risk,
-cost, provider, or team-specific classes) to a harness/model/effort without
-changing runner code. `none` and `null` are reserved sentinels and cannot be
-profile names. Profile model and effort are optional and fall back to harness
-defaults:
-
-```yaml
-default_profile: medium
-profiles:
-  medium:
-    harness: my-agent
-    model: vendor/model
-    effort: high
-```
-
-Keep CLI-version-specific flags here and run
-`.workflow/bin/hekate-agent doctor` after upgrades. Per-developer choices
-belong in the gitignored local override created by:
-
-```sh
-.workflow/bin/hekate-agent config use-profile medium
-# Or bypass profiles:
-.workflow/bin/hekate-agent config use my-agent --model vendor/other-model
-```
-
-Do not put secrets in either config. Project-local harness entries are code
-execution configuration and should only be used in trusted repositories. The
-primary user-facing harness owns architecture, decomposition, route selection,
-orchestration, review, and final verification; custom children remain bounded
-executors/advisors and must not recursively delegate.
-
-### 4. A custom process
-
-For most cases, choosing a preset (`fast` / `medium` / `full`) or the
-`custom` mode at `/init-workflow` is enough — the feature registry in
-`presets.yml` covers disabling Options, skipping TDD, turning off granular
-commits, etc.
-
-If the `Analyze → Options → Plan → Execute → Verify` cycle itself does
-not fit, edit section 3 of `AGENTS.md` and `workflow.yml → process` — for
-example, add a brand-new stage. For toggleable features, prefer adding an
-entry to `presets.yml → features:` (see §2b above) rather than hardcoding
-it in `AGENTS.md`.
-
-The key is to keep a single source of truth: change behavior in
-`AGENTS.md`, not in five adapters.
-
-## Fork or edit in your own project
-
-- **Forking the repository** makes sense if the team has stable
-  non-standard rules (a custom set of YAML files, a custom set of
-  stages). Install via `--repo=your-org/your-fork`.
-- **Editing the files directly in the target project** fits individual
-  settings for a single project.
+The project-local `hekate-agent` controller is retained for existing
+installations but is no longer part of the default payload. It is experimental
+legacy compatibility, not a fallback for native delegation. Existing users can
+reference [`orchestration.md`](orchestration.md); new development targets the
+future Pi wrapper and bounded Pi child processes.
 
 ## Versioning
 
-The `.workflow/*.yml` files are part of the project — commit them to the repo.
-The `.workflow/history/`, `.workflow/runs/`,
-`.workflow/orchestration.local.yml`, and `.workflow/session.local.yml` paths are
-local and stay in `.gitignore`.
-
-Hekate itself uses Semantic Versioning. User-visible changes belong in
-[`CHANGELOG.md`](../CHANGELOG.md); the publication checklist is in
-[`RELEASING.md`](../RELEASING.md). Pin installation and update URLs to a tag
-for reproducible team setups.
+Commit authored project workflow files with the project. Keep history, runs,
+backups, migration archives, and local overrides untracked. Hekate release
+changes are documented in `CHANGELOG.md`; published installs and updates must
+use a full pinned commit SHA.

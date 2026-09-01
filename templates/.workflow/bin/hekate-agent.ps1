@@ -24,11 +24,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)][string]$Command = 'help',
-    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest = @()
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+$Rest = @($Rest)
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..\..')).TrimEnd('\','/')
 $Config = Join-Path $ProjectRoot '.workflow\orchestration.yml'
@@ -143,7 +144,19 @@ function ResolveJob([string]$Id) {
     if (-not (Test-Path -LiteralPath $d -PathType Container)) { Fail "unknown job: $Id" }
     return $d
 }
-function ProcessRecord([int]$Id) { return Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction SilentlyContinue }
+function ProcessRecord([int]$Id) {
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        return Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction SilentlyContinue
+    }
+    $ps = Get-Command ps -ErrorAction SilentlyContinue
+    if (-not $ps) { return $null }
+    $parentText = (& $ps.Source -o ppid= -p $Id 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $parentText) { return $null }
+    $commandLine = ((& $ps.Source -o command= -p $Id 2>$null) -join ' ').Trim()
+    $parentId = 0
+    if (-not [int]::TryParse((($parentText -join '').Trim()), [ref]$parentId)) { return $null }
+    return [PSCustomObject]@{ ParentProcessId=$parentId; CommandLine=$commandLine }
+}
 function CurrentStartTimeToken([int]$Id) {
     try { return (Get-Process -Id $Id -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o') } catch { return '' }
 }
@@ -177,27 +190,33 @@ function WorkerIdentityMatches([string]$Dir,[int]$Id) {
     return $record.CommandLine.Contains('hekate-agent.ps1') -and $record.CommandLine.Contains('__worker') -and $record.CommandLine.Contains($Dir)
 }
 function EffectiveStatus([string]$Dir) {
-    $s = if (Test-Path "$Dir\status") { (Get-Content "$Dir\status" -Raw).Trim() } else { 'unknown' }
+    $statusPath = Join-Path $Dir 'status'
+    $workerPidPath = Join-Path $Dir 'worker-pid'
+    $s = if (Test-Path $statusPath) { (Get-Content $statusPath -Raw).Trim() } else { 'unknown' }
     if ($s -in @('queued','running')) {
-        $p = if (Test-Path "$Dir\worker-pid") { [int](Get-Content "$Dir\worker-pid" -Raw) } else { 0 }
+        $p = if (Test-Path $workerPidPath) { [int](Get-Content $workerPidPath -Raw) } else { 0 }
         if ($p -and -not (WorkerIdentityMatches $Dir $p)) {
-            $s = 'orphaned'; AtomicText "$Dir\status" $s
+            $s = 'orphaned'; AtomicText $statusPath $s
         }
     }
     return $s
 }
 function ReplaceTokens([string]$Text,[string]$Model,[string]$Effort,[string]$Prompt,[string]$Session,[string]$Cwd){return $Text.Replace('{model}',$Model).Replace('{effort}',$Effort).Replace('{prompt_file}',$Prompt).Replace('{session_id}',$Session).Replace('{cwd}',$Cwd)}
-function BuildArgv([string]$Harness,[string]$Model,[string]$Effort,[string]$Prompt,[string]$Session,[string]$Cwd){$out=@();foreach($a in @(HarnessList $Harness 'args')){$out+=ReplaceTokens $a $Model $Effort $Prompt $Session $Cwd};return,$out}
+function BuildArgv([string]$Harness,[string]$Model,[string]$Effort,[string]$Prompt,[string]$Session,[string]$Cwd){$out=@();foreach($a in @(HarnessList $Harness 'args')){$out+=ReplaceTokens $a $Model $Effort $Prompt $Session $Cwd};return $out}
 
 function InvokeWorker([string]$RunDir){
-    AtomicText "$RunDir\status" 'running';AtomicText "$RunDir\started-at" ([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+    $statusPath=Join-Path $RunDir 'status';$startedAtPath=Join-Path $RunDir 'started-at';$workerTokenPath=Join-Path $RunDir 'worker-token'
+    $harnessPath=Join-Path $RunDir 'harness';$modelPath=Join-Path $RunDir 'model';$effortPath=Join-Path $RunDir 'effort';$cwdPath=Join-Path $RunDir 'cwd';$prompt=Join-Path $RunDir 'task.md'
+    $commandPath=Join-Path $RunDir 'command.txt';$stdoutPath=Join-Path $RunDir 'stdout.log';$stderrPath=Join-Path $RunDir 'stderr.log';$childPidPath=Join-Path $RunDir 'child-pid'
+    $exitCodePath=Join-Path $RunDir 'exit-code';$finishedAtPath=Join-Path $RunDir 'finished-at'
     $selfStart = CurrentStartTimeToken $PID
-    AtomicText "$RunDir\worker-token" ("${PID}:$selfStart")
-    $h=(Get-Content "$RunDir\harness" -Raw).Trim();$model=(Get-Content "$RunDir\model" -Raw).Trim();$effort=(Get-Content "$RunDir\effort" -Raw).Trim();$cwd=(Get-Content "$RunDir\cwd" -Raw).Trim();$prompt="$RunDir\task.md";$exe=HarnessValue $h 'command';$delivery=HarnessValue $h 'prompt_delivery';$argv=@(BuildArgv $h $model $effort $prompt (Split-Path $RunDir -Leaf) $cwd)
+    AtomicText $workerTokenPath ("${PID}:$selfStart")
+    AtomicText $startedAtPath ([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'));AtomicText $statusPath 'running'
+    $h=(Get-Content $harnessPath -Raw).Trim();$model=(Get-Content $modelPath -Raw).Trim();$effort=(Get-Content $effortPath -Raw).Trim();$cwd=(Get-Content $cwdPath -Raw).Trim();$exe=HarnessValue $h 'command';$delivery=HarnessValue $h 'prompt_delivery';$argv=@(BuildArgv $h $model $effort $prompt (Split-Path $RunDir -Leaf) $cwd)
     $promptText = Get-Content -LiteralPath $prompt -Raw
-    if ($delivery -eq 'argument') { $argv += $promptText }
-    elseif ($delivery -ne 'stdin' -and $delivery -ne 'file') { Fail "invalid prompt_delivery for $h: $delivery" }
-    [IO.File]::WriteAllText("$RunDir\command.txt",$exe+' '+(($argv|ForEach-Object{'['+$_+']'})-join' ')+[Environment]::NewLine)
+    if ($delivery -eq 'argument') { $argv += $promptText.TrimEnd("`r","`n") }
+    elseif ($delivery -ne 'stdin' -and $delivery -ne 'file') { Fail "invalid prompt_delivery for ${h}: $delivery" }
+    [IO.File]::WriteAllText($commandPath,$exe+' '+(($argv|ForEach-Object{'['+$_+']'})-join' ')+[Environment]::NewLine)
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $exe; $psi.Arguments = (($argv | ForEach-Object { QuoteProcessArg $_ }) -join ' ')
     $psi.WorkingDirectory = $cwd; $psi.UseShellExecute = $false
@@ -211,15 +230,15 @@ function InvokeWorker([string]$RunDir){
     # that is still running. AutoFlush ensures each line is durable as soon
     # as it is written. PowerShell 5.1-compatible: Register-ObjectEvent +
     # BeginOutputReadLine/BeginErrorReadLine, no PS7-only syntax.
-    $stdoutWriter = New-Object IO.StreamWriter("$RunDir\stdout.log", $false, $utf8NoBom)
+    $stdoutWriter = New-Object IO.StreamWriter($stdoutPath, $false, $utf8NoBom)
     $stdoutWriter.AutoFlush = $true
-    $stderrWriter = New-Object IO.StreamWriter("$RunDir\stderr.log", $false, $utf8NoBom)
+    $stderrWriter = New-Object IO.StreamWriter($stderrPath, $false, $utf8NoBom)
     $stderrWriter.AutoFlush = $true
     $writeAction = { if ($null -ne $EventArgs.Data) { $Event.MessageData.WriteLine($EventArgs.Data) } }
     $outEvent = $null; $errEvent = $null
     try {
         if (-not $process.Start()) { Fail "failed to start $exe" }
-        AtomicText "$RunDir\child-pid" ([string]$process.Id)
+        AtomicText $childPidPath ([string]$process.Id)
         $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $writeAction -MessageData $stdoutWriter
         $errEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $writeAction -MessageData $stderrWriter
         $process.BeginOutputReadLine(); $process.BeginErrorReadLine()
@@ -233,7 +252,7 @@ function InvokeWorker([string]$RunDir){
         if ($errEvent) { Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue }
         $stdoutWriter.Close(); $stderrWriter.Close()
     }
-    AtomicText "$RunDir\exit-code" ([string]$code);AtomicText "$RunDir\finished-at" ([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'));AtomicText "$RunDir\status" $(if($code-eq0){'completed'}else{'failed'});return $code
+    AtomicText $exitCodePath ([string]$code);AtomicText $finishedAtPath ([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'));AtomicText $statusPath $(if($code-eq0){'completed'}else{'failed'});return $code
 }
 
 function ShowHarnesses { '{0,-12} {1,-8} {2,-22} {3,-10} {4}'-f'HARNESS','ENABLED','MODEL','EFFORT','COMMAND';foreach($h in HarnessNames){'{0,-12} {1,-8} {2,-22} {3,-10} {4}'-f$h,(HarnessValue $h 'enabled'),(HarnessValue $h 'default_model'),(HarnessValue $h 'default_effort'),(HarnessValue $h 'command')} }
@@ -363,13 +382,13 @@ try {
             $root=JobsRoot; New-Item -ItemType Directory -Force -Path $root | Out-Null
             $job=[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')+'-'+$(if($name){$name}else{$h})+'-'+$PID
             $dir=Join-Path $root $job; New-Item -ItemType Directory -Path $dir | Out-Null
-            if ($taskFile) { Copy-Item -LiteralPath $taskFile -Destination "$dir\task.md" }
-            else { [IO.File]::WriteAllText("$dir\task.md",$task+[Environment]::NewLine) }
-            foreach ($pair in @{profile=$profile;harness=$h;model=$m;effort=$e;cwd=$cwd;status='queued'}.GetEnumerator()) { AtomicText "$dir\$($pair.Key)" ([string]$pair.Value) }
-            AtomicText "$dir\created-at" ([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+            if ($taskFile) { Copy-Item -LiteralPath $taskFile -Destination (Join-Path $dir 'task.md') }
+            else { [IO.File]::WriteAllText((Join-Path $dir 'task.md'),$task+[Environment]::NewLine) }
+            foreach ($pair in @{profile=$profile;harness=$h;model=$m;effort=$e;cwd=$cwd;status='queued'}.GetEnumerator()) { AtomicText (Join-Path $dir $pair.Key) ([string]$pair.Value) }
+            AtomicText (Join-Path $dir 'created-at') ([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
             if ($foreground) {
-                $job; $code=InvokeWorker $dir; Get-Content "$dir\stdout.log"
-                if (Test-Path "$dir\stderr.log") { Get-Content "$dir\stderr.log" | Write-Error -ErrorAction Continue }
+                $job; $code=InvokeWorker $dir; Get-Content (Join-Path $dir 'stdout.log')
+                if (Test-Path (Join-Path $dir 'stderr.log')) { Get-Content (Join-Path $dir 'stderr.log') | Write-Error -ErrorAction Continue }
                 exit $code
             } else {
                 # Windows PowerShell joins ArgumentList items into one command line;
@@ -377,24 +396,32 @@ try {
                 $scriptArg='"'+$MyInvocation.MyCommand.Path.Replace('"','\"')+'"'
                 $dirArg='"'+$dir.Replace('"','\"')+'"'
                 $args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$scriptArg,'__worker',$dirArg)
-                $p=Start-Process powershell -ArgumentList $args -WindowStyle Hidden -PassThru
-                AtomicText "$dir\worker-pid" ([string]$p.Id); $job
+                $startParams=@{
+                    FilePath=(Get-Process -Id $PID).Path
+                    ArgumentList=$args
+                    PassThru=$true
+                    RedirectStandardOutput=(Join-Path $dir 'worker-stdout.log')
+                    RedirectStandardError=(Join-Path $dir 'worker-stderr.log')
+                }
+                if([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT){$startParams.WindowStyle='Hidden'}
+                $p=Start-Process @startParams
+                AtomicText (Join-Path $dir 'worker-pid') ([string]$p.Id); $job
             }
         }
         '__worker' { if($Rest.Count -ne 1){exit 2}; exit (InvokeWorker $Rest[0]) }
         'list' {
             $root=JobsRoot; if(-not(Test-Path $root)){'No jobs.'; break}
             '{0,-36} {1,-10} {2,-10} {3}' -f 'JOB','STATUS','HARNESS','MODEL'
-            Get-ChildItem $root -Directory | ForEach-Object { '{0,-36} {1,-10} {2,-10} {3}' -f $_.Name,(EffectiveStatus $_.FullName),(Get-Content "$($_.FullName)\harness" -Raw).Trim(),(Get-Content "$($_.FullName)\model" -Raw).Trim() }
+            Get-ChildItem $root -Directory | ForEach-Object { '{0,-36} {1,-10} {2,-10} {3}' -f $_.Name,(EffectiveStatus $_.FullName),(Get-Content (Join-Path $_.FullName 'harness') -Raw).Trim(),(Get-Content (Join-Path $_.FullName 'model') -Raw).Trim() }
         }
         'status' {
             if($Rest.Count -ne 1){Fail 'status requires job'}; $d=ResolveJob $Rest[0]
             "job: $($Rest[0])"; "status: $(EffectiveStatus $d)"
-            foreach($f in @('profile','harness','model','effort','cwd','created-at','started-at','finished-at','exit-code','worker-pid')){if(Test-Path "$d\$f"){"${f}: $((Get-Content "$d\$f" -Raw).Trim())"}}
+            foreach($f in @('profile','harness','model','effort','cwd','created-at','started-at','finished-at','exit-code','worker-pid')){$path=Join-Path $d $f;if(Test-Path $path){"${f}: $((Get-Content $path -Raw).Trim())"}}
         }
         'logs' {
             if($Rest.Count -lt 1){Fail 'logs requires job'}; $d=ResolveJob $Rest[0]; $file=if($Rest -contains '--stderr'){'stderr.log'}else{'stdout.log'}
-            if($Rest -contains '--follow'){Get-Content "$d\$file" -Wait}elseif(Test-Path "$d\$file"){Get-Content "$d\$file"}
+            $path=Join-Path $d $file;if($Rest -contains '--follow'){Get-Content $path -Wait}elseif(Test-Path $path){Get-Content $path}
         }
         'wait' {
             # Matches sh semantics exactly: block until a terminal state,
@@ -410,24 +437,25 @@ try {
                 Start-Sleep -Seconds 1
             }
             $code=1
-            if(Test-Path "$d\exit-code"){$raw=(Get-Content "$d\exit-code" -Raw).Trim();if($raw){$code=[int]$raw}}
+            $exitCodePath=Join-Path $d 'exit-code';if(Test-Path $exitCodePath){$raw=(Get-Content $exitCodePath -Raw).Trim();if($raw){$code=[int]$raw}}
             exit $code
         }
         'result' {
             if($Rest.Count -ne 1){Fail 'result requires job'}; $d=ResolveJob $Rest[0]; $s=EffectiveStatus $d
-            if($s -eq 'completed'){Get-Content "$d\stdout.log"}elseif($s -in @('failed','stopped','orphaned')){if(Test-Path "$d\stdout.log"){Get-Content "$d\stdout.log"};if(Test-Path "$d\stderr.log"){Get-Content "$d\stderr.log"|Write-Error -ErrorAction Continue};exit 1}else{Fail "job not finished: $s"}
+            $stdoutPath=Join-Path $d 'stdout.log';$stderrPath=Join-Path $d 'stderr.log';if($s -eq 'completed'){Get-Content $stdoutPath}elseif($s -in @('failed','stopped','orphaned')){if(Test-Path $stdoutPath){Get-Content $stdoutPath};if(Test-Path $stderrPath){Get-Content $stderrPath|Write-Error -ErrorAction Continue};exit 1}else{Fail "job not finished: $s"}
         }
         'stop' {
             if($Rest.Count -ne 1){Fail 'stop requires job'}; $d=ResolveJob $Rest[0]; $state=EffectiveStatus $d
             if($state -notin @('queued','running')){Fail "job is not active: $state"}
-            $workerPid=if(Test-Path "$d\worker-pid"){[int](Get-Content "$d\worker-pid" -Raw)}else{0}
-            if(-not (WorkerIdentityMatches $d $workerPid)){AtomicText "$d\status" 'orphaned';Fail 'worker identity cannot be verified; refusing to signal PID'}
-            if(Test-Path "$d\child-pid"){
-                $childPid=[int](Get-Content "$d\child-pid" -Raw);$child=ProcessRecord $childPid
+            $workerPidPath=Join-Path $d 'worker-pid';$statusPath=Join-Path $d 'status';$childPidPath=Join-Path $d 'child-pid'
+            $workerPid=if(Test-Path $workerPidPath){[int](Get-Content $workerPidPath -Raw)}else{0}
+            if(-not (WorkerIdentityMatches $d $workerPid)){AtomicText $statusPath 'orphaned';Fail 'worker identity cannot be verified; refusing to signal PID'}
+            if(Test-Path $childPidPath){
+                $childPid=[int](Get-Content $childPidPath -Raw);$child=ProcessRecord $childPid
                 if($child -and [int]$child.ParentProcessId -eq $workerPid){Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue}
             }
             Stop-Process -Id $workerPid -Force -ErrorAction SilentlyContinue
-            AtomicText "$d\status" 'stopped'; "Stopped $($Rest[0])"
+            AtomicText $statusPath 'stopped'; "Stopped $($Rest[0])"
         }
         default { ShowHelp; Fail "unknown command: $Command" }
     }

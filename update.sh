@@ -15,6 +15,8 @@
 #   --agents=<list>     Comma-separated adapters to opt into on this update:
 #                       claude,cursor,codex,copilot,gemini,aider.
 #   --force             Overwrite locally edited managed files after confirmation.
+#   --yes               Skip the --force confirmation prompt for non-interactive use.
+#   --replace-unowned  Explicitly approve replacing unowned files during upgrade.
 #   --dry-run           Show what would be done without making changes.
 #   --rollback[=<run>]  Restore the most recent (or a named) backup run instead
 #                       of updating. See update-runner.sh --help for details.
@@ -29,6 +31,8 @@ COMMIT=""
 AGENTS=""
 DRY_RUN=0
 FORCE=0
+YES=0
+REPLACE_UNOWNED=0
 ROLLBACK=0
 ROLLBACK_NAME=""
 
@@ -42,10 +46,12 @@ for arg in "$@"; do
     --agents=*) AGENTS="${arg#--agents=}" ;;
     --dry-run)  DRY_RUN=1 ;;
     --force)    FORCE=1 ;;
+    --yes)      YES=1 ;;
+    --replace-unowned) REPLACE_UNOWNED=1 ;;
     --rollback=*) ROLLBACK=1; ROLLBACK_NAME="${arg#--rollback=}" ;;
     --rollback) ROLLBACK=1 ;;
     -h|--help)
-      sed -n '2,21p' "$0"
+      sed -n '2,22p' "$0"
       exit 0
       ;;
     *)
@@ -103,6 +109,20 @@ fi
 RUNNER="$SNAPSHOT_ROOT/update-runner.sh"
 [ -f "$RUNNER" ] || die "update runner missing in downloaded snapshot"
 
+if [ "$FORCE" -eq 1 ] && [ "$ROLLBACK" -eq 0 ]; then
+  command -v node >/dev/null 2>&1 || die "transactional upgrade requires Node 20 or newer"
+  node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' || die "transactional upgrade requires Node 20 or newer"
+  runtime_root="$SNAPSHOT_ROOT/distribution/runtime"
+  [ -f "$runtime_root/src/hekate-cli.mjs" ] || die "standalone transactional runtime is missing from the source snapshot"
+  set -- upgrade "--to=$REQUESTED_REV" --force "--target=$TARGET" "--source=$SNAPSHOT_ROOT"
+  [ -z "$AGENTS" ] || set -- "$@" "--adapters=$AGENTS"
+  [ "$YES" -eq 0 ] || set -- "$@" --yes
+  [ "$REPLACE_UNOWNED" -eq 0 ] || set -- "$@" --replace-unowned
+  [ "$DRY_RUN" -eq 0 ] || set -- "$@" --dry-run
+  log "starting transactional upgrade from snapshot"
+  HEKATE_RECOVERY_RUNTIME_ROOT="$runtime_root" exec node "$runtime_root/src/hekate-cli.mjs" "$@"
+fi
+
 set -- "--target=$TARGET" "--repo=$REPO" "--ref=$REQUESTED_REV"
 if [ -n "$COMMIT" ]; then
   set -- "$@" "--commit=$COMMIT"
@@ -115,6 +135,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 if [ "$FORCE" -eq 1 ]; then
   set -- "$@" "--force"
+fi
+if [ "$REPLACE_UNOWNED" -eq 1 ]; then
+  set -- "$@" "--replace-unowned"
 fi
 if [ "$ROLLBACK" -eq 1 ]; then
   if [ -n "$ROLLBACK_NAME" ]; then

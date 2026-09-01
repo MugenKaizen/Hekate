@@ -1,4 +1,6 @@
-# Cross-harness delegation. This file is project configuration and may be committed.
+# Legacy experimental cross-harness delegation. Retained for existing 0.x
+# installations; not installed by default and never an automatic fallback.
+# This file is project configuration and may be committed.
 # Personal choices made by `hekate-agent config use` are written to the
 # gitignored `.workflow/orchestration.local.yml`.
 #

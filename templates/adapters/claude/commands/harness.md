@@ -1,42 +1,22 @@
 ---
-description: Start or manage a long-running task in another configured AI harness
-argument-hint: "run [--profile <name> | --harness <name>] <task> | status <job-id> | logs <job-id> | result <job-id> | stop <job-id> | config ..."
+description: Manage the legacy experimental external-harness controller when already installed
 allowed-tools: Bash(.workflow/bin/hekate-agent *)
 ---
 
-Use the project-local cross-harness runner for this request:
+This command is legacy compatibility for an existing `0.x` installation. It is
+not part of bootstrap, portable authorization, or automatic fallback.
 
-```text
+Before use:
+
+1. Require existing `.workflow/orchestration.yml` and
+   `.workflow/bin/hekate-agent` files.
+2. Require `.workflow/orchestration.yml -> enabled: true`.
+3. Read `.workflow/delegation.md` and the legacy component documentation.
+4. Keep architecture, decomposition, routing, review, and acceptance in the
+   primary session.
+
+Use `--task` for a short contract or an arbitrary private `--task-file` for a
+larger one. Do not require optional workflow history to store delegation input.
+Never invoke this command because native delegation was unavailable or denied.
+
 $ARGUMENTS
-```
-
-First require `orchestration.enabled` to be true and ensure neither
-`status.yml → hekate.enabled` nor `hekate.modules.orchestration` is explicitly
-false. If disabled, do not start or manage jobs; suggest `/init-workflow` to change the
-module selection or orchestration configuration.
-
-The runner is `.workflow/bin/hekate-agent`. Do not invoke another harness
-through an ad-hoc shell command when the runner can represent the operation.
-
-The current user-facing Claude session is the primary harness. It exclusively
-owns architecture, decomposition, profile/model choice, orchestration, review,
-and final verification. Delegated children are bounded executors/advisors and
-must not launch subagents, invoke another harness, or recursively delegate.
-
-For a new substantial task:
-
-1. The primary session defines the architecture and bounded execution/advisory
-   slice. Put its complete task contract under `.workflow/history/` or pass it
-   with `--task` when short; include the child role and no-redelegation rule.
-2. The primary classifies/selects an appropriate configured profile (common
-   names include `small`, `medium`, `complex`, or `small-deep`) or an explicit
-   harness. The runner and child do not make this decision.
-3. Start it with `hekate-agent run`; runs are backgrounded by default.
-4. Return the job ID immediately unless the user asked to wait.
-5. Use `status`, `logs`, `wait`, and `result` for lifecycle management.
-6. After completion, inspect the diff and run the parent workflow's own
-   verification. A child result is evidence, not automatic acceptance.
-
-Never start two writer agents in the same checkout. Use separate git worktrees
-for concurrent writers. Run `hekate-agent doctor` if a configured CLI or flag
-is unavailable.

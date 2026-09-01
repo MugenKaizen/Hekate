@@ -55,9 +55,6 @@ branches:
   default: ""              # main | master | trunk (single-branch repos)
   style: ""                # feature/<slug> | <ticket>-<slug>
   protected: []
-  # Populated when workflow.yml → git.three_branch_model.enabled is true.
-  model: ""                # "" | three-branch
-  flow: ""                 # e.g. "feature → dev → stage → main"
 
 review_checklist:
   # What to check before considering a task done.

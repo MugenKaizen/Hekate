@@ -1,0 +1,11 @@
+export { checkProject, compileProject, resolveProjectLock } from "./compiler.js";
+export { materializeInstallationContent } from "./content-materializer.js";
+export { loadInstallManifest, loadInstalledState, planInstallation } from "./install-planner.js";
+export { createInstalledState } from "./install-state.js";
+export { createOperationJournal, createTransactionId, validateOperationJournal } from "./journal.js";
+export { importLegacyProject, validateMigrationReport } from "./legacy-importer.js";
+export { verifyInstalledProject } from "./installation-verifier.js";
+export { resolveInstallationOperations } from "./operation-resolver.js";
+export { acquireProjectUpdateLock, applyPreparedTransaction, cleanupTransactionBundle, prepareOperationTransaction, recoverProjectUpdateLock, rollbackPreparedTransaction, validatePreparedTransaction, writeMigrationReport } from "./transaction-preparer.js";
+export const CONTRACT_SCHEMA_VERSION = 1;
+export const LOCK_SCHEMA_VERSION = 1;

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:migration-report:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_layout", "summary", "entries"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "source_layout": { "const": "legacy-0.x" },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preserved", "transformed", "deprecated", "unresolved"],
+      "properties": {
+        "preserved": { "type": "integer", "minimum": 0 },
+        "transformed": { "type": "integer", "minimum": 0 },
+        "deprecated": { "type": "integer", "minimum": 0 },
+        "unresolved": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_file", "source_path", "source_hash", "target_path", "disposition", "critical", "redacted", "diagnostic_code"],
+        "properties": {
+          "source_file": { "type": "string", "pattern": "^\\.workflow/" },
+          "source_path": { "type": "string" },
+          "source_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "target_path": { "type": ["string", "null"] },
+          "disposition": { "enum": ["preserved", "transformed", "deprecated", "unresolved"] },
+          "critical": { "type": "boolean" },
+          "redacted": { "const": true },
+          "diagnostic_code": { "type": ["string", "null"], "pattern": "^HKT[0-9]{3}$" }
+        }
+      }
+    }
+  }
+}

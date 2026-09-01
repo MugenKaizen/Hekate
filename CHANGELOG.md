@@ -6,16 +6,93 @@ All notable changes to Hekate are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.3.0-beta.1] - 2026-09-01
+
 ### Added
 
-- A master Hekate switch and module allowlist for independently enabling the
-  workflow, local task history, native subagents, and cross-harness
-  orchestration. Initialization offers `all`, `history + subagents`, `off`, or
-  a custom selection; migration `009-add-module-switches` preserves the old
-  all-enabled behavior for existing installations.
+- Node 20 deterministic core and CLI packages with strict YAML 1.2 parsing,
+  versioned schemas, profile resolution, stable gate states, canonical
+  `status.lock.json` compilation, and `check` / `compile` commands.
+- Cross-platform CI for Node, POSIX, and Windows PowerShell suites.
+- Transactional forced upgrade, dry-run, and offline rollback with ownership
+  ledgers, historical import preservation reports, and repeat-upgrade fixtures.
+- A manifest-installed Pi adapter, mandatory global/inline Pi enforcement
+  extension, and SDK-based `hekate agent` wrapper with TUI, print, JSON, RPC,
+  stdin prompts, project trust, bootstrap, and settings UI.
+- Opt-in wrapper-native Pi subagents with advisory capability isolation,
+  aggregate resource budgets, process-tree cancellation, structured evidence,
+  and Git-authenticated writer worktrees.
+
+### Fixed
+
+- A forced upgrade no longer replaces files Hekate has no record of installing
+  without review. The preservation report and operation plan are printed before
+  confirmation, each unowned file is named, and `--yes` refuses with `HKT903`
+  unless `--replace-unowned` states the approval explicitly.
+- `install.sh --force` and `install.ps1 -Force` recognize a v1 contract
+  installation instead of falling through to the fresh-install copy path, which
+  overwrote managed files outside the transaction engine. The frozen legacy
+  update runners refuse a v1 layout with an actionable message.
+- Unknown adapter names are rejected by the shell and PowerShell installers
+  rather than silently installing the core component only.
+- `.workflow/state.yml` is replaced atomically, so an interrupted write can no
+  longer truncate the applied-migration ledger and `installed_ref`.
+- The migration-ledger parser reads block sequences written at the same
+  indentation as their key; previously every recorded migration ID was dropped
+  and already-applied migrations re-ran.
+- A writer subagent lease is published only after it is acquired, so a losing
+  contender no longer deletes the holder's live lease.
+- Pi extension commands and status updates no longer require optional UI
+  methods, keeping behavior identical in TUI, print, JSON, and RPC modes.
+- Pi enforcement revalidates project readiness before each non-read tool call,
+  preventing a session from retaining mutation authority after its lock becomes
+  stale, malformed, or forged.
+- Explicit cleanup preserves proof of unpublished preparation, reports partial
+  component removal, and converges safely when retried after interruption.
+- The published CLI tarball now contains its manifest and template payload;
+  Pi is an optional peer so Node 20 transactional commands do not install a
+  runtime that requires Node 22.19.
+- CI installs all workspace tarballs in a clean consumer and exercises the
+  transactional lifecycle on Node 20 plus the optional Pi boundary on Node
+  22.19.
+- Bun 1.3.14+ is supported alongside npm with an independent frozen lockfile,
+  full core/CLI coverage, clean installed-tarball lifecycle tests, and Linux
+  and macOS CI jobs.
+- Commit-pinned portable upgrades use a reproducible standalone transaction
+  runtime instead of `npm ci` and retain that executable in each recovery
+  bundle for offline rollback.
+- An aborted legacy import keeps its machine-readable report under
+  `.workflow/migration/<run-id>/` for offline inspection.
 
 ### Changed
 
+- A dedicated Hekate TUI is explicitly deferred until real-use UX evidence and
+  a stable renderer-independent session adapter exist; the SDK wrapper keeps
+  the stock Pi TUI as its supported interactive surface.
+- The default payload no longer installs `stack.yml`, `architecture.yml`,
+  `conventions.yml`, or `presets.yml`. `project.yml` owns those facts and
+  profile definitions ship with Hekate, so a project records only its selection.
+  The files remain available as the opt-in `legacy-workflow-files` component
+  through `--components`, `install.sh --legacy-workflow-files`, and
+  `install.ps1 -LegacyWorkflowFiles`.
+- Manifest `update_strategy` and `remove_strategy` now govern installation
+  dispositions; `create-only` and `preserve` assets can no longer overwrite an
+  existing file, and `archive` removals are journaled as an archive copy plus a
+  backed-up delete.
+- The Hekate wrapper forwards `SIGINT` and `SIGTERM` to the running Pi session,
+  detaches its handlers when the run ends, and exits with the conventional
+  signal code.
+- The portable task contract is now adaptive: Understand, Decide when needed,
+  Plan when needed, Execute, and Verify. Profiles no longer impose mandatory
+  option rounds, plan approval, automatic commits, or branch creation.
+- TDD policy is normalized to `off`, `prefer-test-first`, or
+  `require-test-evidence`; completion evidence is based on observed checks.
+- Local history is optional and disabled by default instead of creating
+  per-stage Markdown and JSONL artifacts for every task.
+- Native-subagent authorization belongs to the active harness. The portable
+  `off | ask | auto` policy is no longer installed.
+- Cross-harness orchestration is retained as a legacy experimental component
+  for existing installations and removed from the fresh default payload.
 - Installer and updater output is prefixed `[hekate]` instead of `[aaw]`, a
   leftover from an earlier project name that was visible on every line the user
   sees. Temporary working directories follow the same rename.
@@ -134,6 +211,7 @@ All notable changes to Hekate are documented here. The project follows
 - This is an early beta; configuration and job metadata formats may change
   before `1.0.0`.
 
-[Unreleased]: https://github.com/MugenKaizen/Hekate/compare/v0.2.0-beta.1...HEAD
+[Unreleased]: https://github.com/MugenKaizen/Hekate/compare/v0.3.0-beta.1...HEAD
+[0.3.0-beta.1]: https://github.com/MugenKaizen/Hekate/compare/v0.2.0-beta.1...v0.3.0-beta.1
 [0.2.0-beta.1]: https://github.com/MugenKaizen/Hekate/compare/v0.1.0-beta.1...v0.2.0-beta.1
 [0.1.0-beta.1]: https://github.com/MugenKaizen/Hekate/releases/tag/v0.1.0-beta.1

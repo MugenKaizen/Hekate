@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:prepared-transaction:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "transaction_id", "journal_hash", "operations"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "transaction_id": {"type": "string", "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16}$"},
+    "journal_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation", "path", "ownership", "before_hash", "after_hash", "backup_path", "staged_path", "before_mode", "target_mode"],
+        "properties": {
+          "operation": {"enum": ["create", "replace", "delete", "merge"]},
+          "path": {"type": "string", "minLength": 1},
+          "ownership": {"enum": ["template-managed", "project-seed", "local-seed", "generated", "shared-merge", "user-owned"]},
+          "before_hash": {"anyOf": [{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, {"type": "null"}]},
+          "after_hash": {"anyOf": [{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, {"type": "null"}]},
+          "backup_path": {"type": ["string", "null"]},
+          "staged_path": {"type": ["string", "null"]},
+          "before_mode": {"type": ["integer", "null"], "minimum": 0, "maximum": 511},
+          "target_mode": {"type": ["integer", "null"], "minimum": 0, "maximum": 511}
+        }
+      }
+    }
+  }
+}

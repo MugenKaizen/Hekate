@@ -1,0 +1,72 @@
+# Project conventions: code style, naming, tests, commits.
+# The agent must follow them in every file it creates or modifies.
+
+code_style:
+  formatter: ""            # prettier | black | ruff-format | gofmt | rustfmt | other
+  linter: ""               # eslint | ruff | golangci-lint | clippy | other
+  max_line_length: 0
+  indent: ""               # spaces-2 | spaces-4 | tabs
+  enforce_on_save: false
+
+naming:
+  files: ""                # kebab-case | snake_case | PascalCase | camelCase
+  directories: ""          # kebab-case | snake_case
+  variables: ""            # snake_case | camelCase
+  classes: ""              # PascalCase
+  constants: ""            # UPPER_SNAKE_CASE
+  test_files: ""           # e.g. "*.test.ts" | "test_*.py" | "*_test.go"
+
+tests:
+  required: true           # require tests for new functionality
+  location: ""             # co-located | separate-tree (tests/) | mirror-src
+  types:
+    unit: true
+    integration: false
+    e2e: false
+  coverage_min: 0          # 0 = do not require
+  run_before_commit: true
+
+commits:
+  # During /init-workflow the agent offers one of the named presets below
+  # and fills the whole block from it. See .workflow/bootstrap.md for full definitions
+  # and examples. Preset choice and message language are independent: any
+  # preset works with any language.
+  #
+  # Presets:
+  #   - conventional    — Conventional Commits 1.0 (feat/fix/refactor/...)
+  #   - gitmoji         — emoji from gitmoji.dev in front of the type
+  #   - emoji-prefix    — short local emoji map in front of the type
+  #   - free-form       — no strict template, only subject length is enforced
+  #   - custom          — answer the raw fields below by hand
+  preset: ""               # conventional | gitmoji | emoji-prefix | free-form | custom
+  style: ""                # conventional | gitmoji | free-form
+  subject_max_length: 72
+  language: ""             # en | ru | de | es | fr | pt | zh | ja | other | free string (e.g. "ru-en-mix")
+  require_body_for:        # when a commit body is required
+    - "feat"
+    - "fix"
+    - "refactor"
+  forbid_in_subject:       # what must not appear in the subject line
+    - "ticket numbers without prefix"
+  # Used by presets `gitmoji` and `emoji-prefix`. Map: commit type -> emoji.
+  emoji_map: {}
+
+branches:
+  default: ""              # main | master | trunk (single-branch repos)
+  style: ""                # feature/<slug> | <ticket>-<slug>
+  protected: []
+  # Populated when workflow.yml → git.three_branch_model.enabled is true.
+  model: ""                # "" | three-branch
+  flow: ""                 # e.g. "feature → dev → stage → main"
+
+review_checklist:
+  # What to check before considering a task done.
+  # - "tests pass"
+  # - "linter is green"
+  # - "documentation is updated when the public API changes"
+  []
+
+documentation:
+  readme_required: true
+  changelog: ""            # keep-a-changelog | auto-from-commits | none
+  api_docs: ""             # openapi | typedoc | sphinx | godoc | none

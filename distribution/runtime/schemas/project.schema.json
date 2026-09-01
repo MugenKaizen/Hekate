@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:project:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "identity", "stack", "verification", "architecture", "confirmation", "extensions"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "description"],
+      "properties": {
+        "name": { "$ref": "#/$defs/requiredStringFact" },
+        "kind": { "$ref": "#/$defs/kindFact" },
+        "description": { "$ref": "#/$defs/stringFact" }
+      }
+    },
+    "stack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["languages", "frameworks", "runtimes", "dependencies"],
+      "properties": {
+        "languages": { "$ref": "#/$defs/languagesFact" },
+        "frameworks": { "$ref": "#/$defs/stringArrayFact" },
+        "runtimes": { "$ref": "#/$defs/runtimesFact" },
+        "dependencies": { "$ref": "#/$defs/stringArrayFact" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "lint", "test", "build", "validate"],
+      "properties": {
+        "format": { "$ref": "#/$defs/commandsFact" },
+        "lint": { "$ref": "#/$defs/commandsFact" },
+        "test": { "$ref": "#/$defs/commandsFact" },
+        "build": { "$ref": "#/$defs/commandsFact" },
+        "validate": { "$ref": "#/$defs/commandsFact" }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["references", "constraints"],
+      "properties": {
+        "references": { "$ref": "#/$defs/referencesFact" },
+        "constraints": { "$ref": "#/$defs/stringArrayFact" }
+      }
+    },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": { "state": { "enum": ["pending", "confirmed", "not_applicable"] } }
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+$" }
+    }
+  },
+  "$defs": {
+    "unknownFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": { "state": { "enum": ["unknown", "not_applicable"] } }
+    },
+    "unknownRequiredFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": { "state": { "const": "unknown" } }
+    },
+    "stringFact": {
+      "oneOf": [
+        { "$ref": "#/$defs/unknownFact" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": { "state": { "const": "known" }, "value": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    },
+    "requiredStringFact": {
+      "oneOf": [
+        { "$ref": "#/$defs/unknownRequiredFact" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": { "state": { "const": "known" }, "value": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    },
+    "kindFact": {
+      "oneOf": [
+        { "$ref": "#/$defs/unknownRequiredFact" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": { "enum": ["web-app", "cli", "library", "service", "mobile", "monorepo", "documentation", "other"] }
+          }
+        }
+      ]
+    },
+    "stringArrayFact": {
+      "oneOf": [
+        { "$ref": "#/$defs/unknownFact" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+          }
+        }
+      ]
+    },
+    "languagesFact": {
+      "oneOf": [
+        { "$ref": "#/$defs/unknownFact" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1 },
+                  "version": { "type": "string", "minLength": 1 },
+                  "package_manager": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "runtimesFact": {
+      "oneOf": [
+        { "$ref": "#/$defs/unknownFact" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": { "name": { "type": "string", "minLength": 1 }, "version": { "type": "string", "minLength": 1 } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "commandsFact": {
+      "oneOf": [
+        { "$ref": "#/$defs/unknownFact" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+          }
+        }
+      ]
+    },
+    "referencesFact": {
+      "oneOf": [
+        { "$ref": "#/$defs/unknownFact" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": { "const": "known" },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path"],
+                "properties": { "path": { "type": "string", "minLength": 1 }, "label": { "type": "string" } }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

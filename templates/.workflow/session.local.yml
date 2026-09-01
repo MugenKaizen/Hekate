@@ -1,3 +1,5 @@
+# Legacy local policy retained only for existing 0.x installations. New
+# installations defer native-subagent authorization to the active harness.
 # Local policy for native subagents in the current user-facing harness session.
 # This file is gitignored. The user may change the mode at any time.
 # Missing/invalid mode is treated as `ask`.

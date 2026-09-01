@@ -1,65 +1,9 @@
 ---
-description: Mandatory working process — before any task, read AGENTS.md and .workflow/status.yml
+description: Use AGENTS.md as the portable workflow contract
 globs: **/*
 alwaysApply: true
 ---
 
-# Workflow
-
-This project uses **`AGENTS.md`** (in the repository root) as the single
-source of truth for all AI agents. Read it in full before doing any work.
-
-For pre-flight, read only:
-
-- `.workflow/status.yml` — Hekate switch/module allowlist, initialization
-  status, and resolved feature flags
-
-Apply `status.yml → hekate` first. If `hekate.enabled` is false, stop applying
-Hekate rules. Run workflow, history, native-subagent, and orchestration behavior
-unless its corresponding `hekate.modules` value is explicitly false. Missing
-switches mean enabled for compatibility with older installations.
-
-Lazy-load the detailed `.workflow/*.yml` files only when the current task needs
-stack, architecture, conventions, full workflow rules, or preset definitions.
-
-## Blocking
-
-When the workflow module is enabled, if `status.yml → initialized` is not `true`, `active_preset` is `null`, or any
-`checks.*` value is not `true` — **do not start work**. Run or refresh the
-*Bootstrap* procedure from `.workflow/bootstrap.md`: analyze the project, fill
-out YAML drafts, get user confirmation, and update `.workflow/status.yml`.
-
-## Task cycle
-
-Unless `hekate.modules.workflow` is false, the required stages depend on the active preset in
-`status.yml → active_preset`. Respect the flags in `status.yml → features`:
-only stages whose feature is enabled are mandatory.
-
-Typical full cycle: **Analyze → Options (≥2, with pros/cons) → Plan
-(self-contained; in `.workflow/history/` when history is enabled) → Execute →
-Verify**.
-
-If `status.yml → features.light_tdd: true`, apply light TDD for
-non-trivial behavior changes. Default mode is `strict-lite`: add or update a
-focused test first unless there is a clear, explicitly stated reason not to.
-
-If `status.yml → features.granular_commits` is enabled and the task is large,
-the plan must include a checkpoint checklist. Store it in `.workflow/history/`
-only when the history module is enabled. After
-each verified checkpoint, lazy-load `.workflow/workflow.yml` if the exact
-granular-commit mode is needed.
-
-Details are in section 3 of `AGENTS.md`.
-
-## History
-
-Unless `hekate.modules.history` is false:
-
-- `.workflow/history/YYYY-MM-DD-<slug>.md` per task;
-- `.workflow/history/events.jsonl` — a structured event log.
-
-## Scope
-
-Don't do unrequested refactors, don't add dependencies without
-discussion, and perform destructive actions only with explicit
-confirmation.
+Read root `AGENTS.md` and apply its preflight, adaptive workflow, verification,
+authorization, and scope rules. Do not duplicate those rules here. Lazy-load
+`.workflow/*` project context only when the current task needs it.

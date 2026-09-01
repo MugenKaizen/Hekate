@@ -7,6 +7,8 @@ param(
     [string]$Commit = '',
     [string]$Agents = '',
     [switch]$Force,
+    [switch]$Yes,
+    [switch]$ReplaceUnowned,
     [switch]$DryRun,
     [switch]$Rollback,
     [string]$RollbackName = '',
@@ -16,6 +18,7 @@ param(
 )
 
 Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
 
 function Write-AawLog { param([string]$Message) Write-Host "[hekate] $Message" }
 function Throw-Aaw { param([string]$Message) throw "[hekate] ERROR: $Message" }
@@ -38,6 +41,8 @@ Flags:
   -Agents <list>     Comma-separated adapters to opt into on this update:
                      claude,cursor,codex,copilot,gemini,aider.
   -Force             Overwrite locally edited managed files after confirmation.
+  -Yes               Skip the confirmation prompt for non-interactive use.
+  -ReplaceUnowned    Explicitly approve replacing unowned files during upgrade.
   -DryRun            Show what would be done without making changes.
   -Rollback           Restore the most recent (or a named) backup run instead of
                       updating. See update-runner.ps1 -Help for details.
@@ -53,6 +58,8 @@ foreach ($arg in $Rest) {
     if ($arg -like '--commit=*') { $Commit = $arg.Substring(9); continue }
     if ($arg -like '--agents=*') { $Agents = $arg.Substring(9); continue }
     if ($arg -eq '--force') { $Force = $true; continue }
+    if ($arg -eq '--yes') { $Yes = $true; continue }
+    if ($arg -eq '--replace-unowned') { $ReplaceUnowned = $true; continue }
     if ($arg -eq '--dry-run') { $DryRun = $true; continue }
     if ($arg -like '--rollback=*') { $Rollback = $true; $RollbackName = $arg.Substring(11); continue }
     if ($arg -eq '--rollback') { $Rollback = $true; continue }
@@ -94,11 +101,31 @@ try {
     $runner = Join-Path $snapshotRoot 'update-runner.ps1'
     if (-not (Test-Path -LiteralPath $runner)) { Throw-Aaw 'update runner missing in downloaded snapshot' }
 
+    if ($Force -and -not $Rollback) {
+        $node = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $node) { Throw-Aaw 'transactional upgrade requires Node 20 or newer' }
+        & $node.Source -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+        if ($LASTEXITCODE -ne 0) { Throw-Aaw 'transactional upgrade requires Node 20 or newer' }
+        $runtimeRoot = Join-Path $snapshotRoot 'distribution/runtime'
+        $runtime = Join-Path $runtimeRoot 'src/hekate-cli.mjs'
+        if (-not (Test-Path -LiteralPath $runtime)) { Throw-Aaw 'standalone transactional runtime is missing from the source snapshot' }
+        $upgradeArgs = @($runtime, 'upgrade', "--to=$requestedRev", '--force', "--target=$Target", "--source=$snapshotRoot")
+        if ($Agents) { $upgradeArgs += "--adapters=$Agents" }
+        if ($Yes) { $upgradeArgs += '--yes' }
+        if ($ReplaceUnowned) { $upgradeArgs += '--replace-unowned' }
+        if ($DryRun) { $upgradeArgs += '--dry-run' }
+        Write-AawLog 'starting transactional upgrade from snapshot'
+        $env:HEKATE_RECOVERY_RUNTIME_ROOT = $runtimeRoot
+        & $node.Source @upgradeArgs
+        exit $LASTEXITCODE
+    }
+
     $runnerArgs = @('-Target', $Target, '-Repo', $Repo, '-Ref', $requestedRev)
     if ($Commit) { $runnerArgs += @('-Commit', $Commit) }
     if ($Agents) { $runnerArgs += @('-Agents', $Agents) }
     if ($DryRun) { $runnerArgs += '-DryRun' }
     if ($Force) { $runnerArgs += '-Force' }
+    if ($ReplaceUnowned) { $runnerArgs += '-ReplaceUnowned' }
     if ($RollbackName) { $runnerArgs += @('-RollbackName', $RollbackName) }
     elseif ($Rollback) { $runnerArgs += '-Rollback' }
 

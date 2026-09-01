@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:install-plan:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_version", "selected_adapters", "selected_components", "assets", "diagnostics"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_version": {"type": "integer", "minimum": 1},
+    "selected_adapters": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "selected_components": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "destination", "ownership", "provenance", "disposition", "current_hash", "target_hash"],
+        "properties": {
+          "asset_id": {"type": "string"},
+          "destination": {"type": "string"},
+          "ownership": {"type": "string"},
+          "provenance": {"enum": ["recorded", "unrecorded", "not-applicable"]},
+          "disposition": {"enum": ["create", "current", "replace", "replace-candidate", "preserve", "merge", "regenerate", "remove"]},
+          "current_hash": {"type": ["string", "null"]},
+          "target_hash": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "file", "path", "message"],
+        "properties": {
+          "code": {"type": "string", "pattern": "^HKT[0-9]{3}$"},
+          "file": {"type": "string"},
+          "path": {"type": "string"},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  }
+}

@@ -2,9 +2,6 @@
 # scenarios against templates/.workflow/bin/hekate-agent.ps1. Windows
 # PowerShell 5.1-compatible: no ?:, ??, or other PS7-only syntax.
 #
-# NOTE: this suite has not been executed against a real PowerShell/pwsh
-# install as part of authoring it (none was available in the environment
-# that wrote it). Review carefully before trusting a first "pass" result.
 [CmdletBinding()]
 param()
 
@@ -30,16 +27,14 @@ function AssertNotContains([string]$Haystack, [string]$Needle, [string]$Label) {
     if ($null -eq $Haystack) { $Haystack = '' }
     if ($Haystack.Contains($Needle)) { TestFail "did not expect [$Needle] in [$Label]: $Haystack" }
 }
+function RunId([string]$Output) { return (($Output -split "\r?\n")[0]).Trim() }
 
-# --- locate a PowerShell interpreter to run the CLI as a genuine separate
+# --- use the current PowerShell interpreter to run the CLI as a genuine separate
 # process (invoking a .ps1 in-process via `&` would mean its `exit` calls
 # tear down this test runner too).
-$ShellExe = $null
-foreach ($candidate in @('pwsh', 'powershell')) {
-    $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($cmd) { $ShellExe = $cmd.Source; break }
-}
-if (-not $ShellExe) { Write-Error 'no pwsh or powershell found to drive the CLI under test'; exit 2 }
+$ShellExe = (Get-Process -Id $PID).Path
+$OnWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+$FakeCommandSuffix = if ($OnWindows) { '.cmd' } else { '' }
 
 $CliPath = Join-Path $Project '.workflow\bin\hekate-agent.ps1'
 
@@ -65,7 +60,7 @@ try {
         if ($line -match '^default_profile:') { $out.Add('default_profile: medium'); continue }
         if ($line -match '^  ([A-Za-z0-9_.-]+):\s*$') { $currentHarness = $Matches[1] }
         if ($line -match '^    command:\s*(\S+)\s*$' -and $currentHarness -in @('claude', 'pi', 'aider')) {
-            $out.Add("    command: $currentHarness.cmd"); continue
+            $out.Add("    command: ${currentHarness}${FakeCommandSuffix}"); continue
         }
         if ($line -match '^  opencode:\s*$') { $out.Add($line); continue }
         if ($currentHarness -eq 'opencode' -and $line -match '^    command:') {
@@ -74,7 +69,7 @@ try {
         if (-not $insertedFakes -and $line -match '^  claude:\s*$') {
             $out.Add('  fakeXcli:')
             $out.Add('    enabled: true')
-            $out.Add('    command: claude.cmd')
+            $out.Add("    command: claude$FakeCommandSuffix")
             $out.Add('    prompt_delivery: stdin')
             $out.Add('    supports_model: true')
             $out.Add('    supports_effort: true')
@@ -83,7 +78,7 @@ try {
             $out.Add('    args:')
             $out.Add('  fake.cli:')
             $out.Add('    enabled: true')
-            $out.Add('    command: pi.cmd')
+            $out.Add("    command: pi$FakeCommandSuffix")
             $out.Add('    prompt_delivery: argument')
             $out.Add('    supports_model: true')
             $out.Add('    supports_effort: true')
@@ -130,8 +125,9 @@ try {
     Set-Content -LiteralPath $dstConfig -Value $out -Encoding UTF8
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'templates\.workflow\bin\hekate-agent.ps1') -Destination $CliPath -Force
 
-    # --- fake harness executables (Windows batch, direct-launchable) -------
-    Set-Content -LiteralPath (Join-Path $FakeBin 'pi.cmd') -Value @'
+    # --- fake harness executables ------------------------------------------
+    if ($OnWindows) {
+        Set-Content -LiteralPath (Join-Path $FakeBin 'pi.cmd') -Value @'
 @echo off
 setlocal EnableDelayedExpansion
 set out=pi-args:
@@ -147,7 +143,7 @@ goto loop
 echo !out!
 '@ -Encoding ASCII
 
-    Set-Content -LiteralPath (Join-Path $FakeBin 'claude.cmd') -Value @'
+        Set-Content -LiteralPath (Join-Path $FakeBin 'claude.cmd') -Value @'
 @echo off
 setlocal EnableDelayedExpansion
 set out=claude-args:
@@ -162,7 +158,7 @@ echo prompt:
 findstr "^"
 '@ -Encoding ASCII
 
-    Set-Content -LiteralPath (Join-Path $FakeBin 'aider.cmd') -Value @'
+        Set-Content -LiteralPath (Join-Path $FakeBin 'aider.cmd') -Value @'
 @echo off
 :loop
 if "%~1"=="" goto notfound
@@ -179,8 +175,39 @@ exit /b 0
 :notfound
 exit /b 2
 '@ -Encoding ASCII
+    } else {
+        Set-Content -LiteralPath (Join-Path $FakeBin 'pi') -Value @'
+#!/bin/sh
+printf 'pi-args:'
+code=''
+for arg in "$@"; do
+  printf '<%s>' "$arg"
+  [ "$arg" != SLOW ] || sleep 30
+  case "$arg" in FAIL:*) code=${arg#FAIL:} ;; esac
+done
+printf '\n'
+[ -z "$code" ] || exit "$code"
+'@ -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $FakeBin 'claude') -Value @'
+#!/bin/sh
+printf 'claude-args:'
+for arg in "$@"; do printf '<%s>' "$arg"; done
+printf '\nprompt:'
+cat
+'@ -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $FakeBin 'aider') -Value @'
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --message-file ]; then shift; printf 'file-prompt:'; cat "$1"; exit 0; fi
+  shift
+done
+exit 2
+'@ -Encoding UTF8
+        & /bin/chmod +x (Join-Path $FakeBin 'pi') (Join-Path $FakeBin 'claude') (Join-Path $FakeBin 'aider')
+        if ($LASTEXITCODE -ne 0) { TestFail 'could not make fake harnesses executable' }
+    }
 
-    $env:Path = "$FakeBin;$env:Path"
+    $env:PATH = "$FakeBin$([IO.Path]::PathSeparator)$env:PATH"
     Push-Location $Project
 
     # Disabled by default.
@@ -196,7 +223,7 @@ exit /b 2
 
     $r = Invoke-Hekate 'run' '--task' 'implicit committed profile' '--foreground'
     if ($r.Code -ne 0) { TestFail "implicit profile run failed: $($r.Err)" }
-    $implicit = $r.Out.Trim()
+    $implicit = RunId $r.Out
     $implicitDir = Join-Path $Project ".workflow\runs\$implicit"
     if ((Get-Content -LiteralPath (Join-Path $implicitDir 'profile') -Raw).Trim() -ne 'medium') { TestFail 'committed default profile not persisted' }
     if ((Get-Content -LiteralPath (Join-Path $implicitDir 'model') -Raw).Trim() -ne 'fake/sol') { TestFail 'committed profile model not resolved' }
@@ -218,25 +245,25 @@ exit /b 2
     # Dotted profile/harness names.
     $harnesses = (Invoke-Hekate 'harnesses').Out
     $dottedLine = ($harnesses -split "`n") | Where-Object { $_ -match '^fake\.cli\s' }
-    AssertContains $dottedLine 'command=pi.cmd' 'harnesses'
-    AssertContains $dottedLine 'model=fake/dotted-harness' 'harnesses'
+    AssertContains $dottedLine "pi$FakeCommandSuffix" 'harnesses'
+    AssertContains $dottedLine 'fake/dotted-harness' 'harnesses'
     $r = Invoke-Hekate 'run' '--profile' 'a.b' '--task' 'dotted exact profile' '--foreground'
     if ($r.Code -ne 0) { TestFail "dotted profile run failed: $($r.Err)" }
-    $dottedDir = Join-Path $Project ".workflow\runs\$($r.Out.Trim())"
+    $dottedDir = Join-Path $Project ".workflow\runs\$(RunId $r.Out)"
     if ((Get-Content -LiteralPath (Join-Path $dottedDir 'model') -Raw).Trim() -ne 'fake/dotted') { TestFail 'dotted profile aliased another name' }
 
     $r = Invoke-Hekate 'run' '--profile' 'quoted' '--task' 'quoted profile values' '--foreground'
     if ($r.Code -ne 0) { TestFail "quoted profile run failed: $($r.Err)" }
-    $quotedDir = Join-Path $Project ".workflow\runs\$($r.Out.Trim())"
+    $quotedDir = Join-Path $Project ".workflow\runs\$(RunId $r.Out)"
     if ((Get-Content -LiteralPath (Join-Path $quotedDir 'harness') -Raw).Trim() -ne 'pi') { TestFail 'single-quoted harness was not unquoted' }
     if ((Get-Content -LiteralPath (Join-Path $quotedDir 'model') -Raw).Trim() -ne 'fake/quoted') { TestFail 'single-quoted model was not unquoted' }
 
     # Local profile selection, explicit effort override.
     $r = Invoke-Hekate 'config' 'use-profile' 'small'
-    AssertContains $r.Out 'default_profile: small' 'config use-profile'
+    AssertContains $r.Out 'Default profile: small' 'config use-profile'
     $r = Invoke-Hekate 'run' '--task' 'local profile override' '--effort' 'xhigh' '--foreground'
     if ($r.Code -ne 0) { TestFail "local profile run failed: $($r.Err)" }
-    $localDir = Join-Path $Project ".workflow\runs\$($r.Out.Trim())"
+    $localDir = Join-Path $Project ".workflow\runs\$(RunId $r.Out)"
     if ((Get-Content -LiteralPath (Join-Path $localDir 'effort') -Raw).Trim() -ne 'xhigh') { TestFail 'explicit effort did not override profile' }
     $statusOut = (Invoke-Hekate 'status' (Split-Path $localDir -Leaf)).Out
     AssertContains $statusOut 'profile: small' 'status'
@@ -253,14 +280,14 @@ exit /b 2
 
     # Runtime harness selection disables inherited profile.
     $r = Invoke-Hekate 'config' 'use' 'pi' '--model' 'fake/model' '--effort' 'low'
-    AssertContains $r.Out 'default_harness: pi' 'config use'
-    AssertContains $r.Out 'default_profile: none' 'config use'
+    AssertContains $r.Out 'Default harness: pi' 'config use'
+    AssertContains (Get-Content -LiteralPath (Join-Path $Project '.workflow\orchestration.local.yml') -Raw) 'default_profile: none' 'config use'
 
     # Foreground argv-safety: a semicolon-laden single task string survives
     # as one argv element, and is never handed to a shell.
     $r = Invoke-Hekate 'run' '--task' 'implement a long task; do not split me' '--foreground'
     if ($r.Code -ne 0) { TestFail "foreground run failed: $($r.Err)" }
-    $fgDir = Join-Path $Project ".workflow\runs\$($r.Out.Trim())"
+    $fgDir = Join-Path $Project ".workflow\runs\$(RunId $r.Out)"
     $fgOut = Get-Content -LiteralPath (Join-Path $fgDir 'stdout.log') -Raw
     AssertContains $fgOut '<fake/model>' 'stdout.log'
     AssertContains $fgOut '<low>' 'stdout.log'
@@ -270,7 +297,7 @@ exit /b 2
     # --- background lifecycle + item 2: wait returns the real exit code ----
     $r = Invoke-Hekate 'run' '--harness' 'pi' '--task' 'background task'
     if ($r.Code -ne 0) { TestFail "background run submission failed: $($r.Err)" }
-    $job = $r.Out.Trim()
+    $job = RunId $r.Out
     $waitResult = Invoke-Hekate 'wait' $job
     if ($waitResult.Code -ne 0) { TestFail "wait did not return the harness's real (zero) exit code: $($waitResult.Code)" }
     $statusOut = (Invoke-Hekate 'status' $job).Out
@@ -282,7 +309,7 @@ exit /b 2
     Invoke-Hekate 'config' 'use' 'claude' '--model' 'sonnet' '--effort' 'high' | Out-Null
     $r = Invoke-Hekate 'run' '--task' 'stdin task body' '--foreground'
     if ($r.Code -ne 0) { TestFail "claude stdin run failed: $($r.Err)" }
-    $claudeDir = Join-Path $Project ".workflow\runs\$($r.Out.Trim())"
+    $claudeDir = Join-Path $Project ".workflow\runs\$(RunId $r.Out)"
     $claudeOut = Get-Content -LiteralPath (Join-Path $claudeDir 'stdout.log') -Raw
     AssertContains $claudeOut '<sonnet>' 'claude stdout'
     AssertContains $claudeOut '<high>' 'claude stdout'
@@ -292,11 +319,13 @@ exit /b 2
     # file delivery (Aider).
     $r = Invoke-Hekate 'run' '--harness' 'aider' '--task' 'task from file' '--foreground'
     if ($r.Code -ne 0) { TestFail "aider run failed: $($r.Err)" }
-    $aiderDir = Join-Path $Project ".workflow\runs\$($r.Out.Trim())"
+    $aiderDir = Join-Path $Project ".workflow\runs\$(RunId $r.Out)"
     AssertContains (Get-Content -LiteralPath (Join-Path $aiderDir 'stdout.log') -Raw) 'file-prompt:task from file' 'aider stdout'
 
     # doctor: missing optional CLI is reported, not fatal by default.
-    $doctor = (Invoke-Hekate 'doctor').Out
+    $doctorResult = Invoke-Hekate 'doctor'
+    if ($doctorResult.Code -ne 0) { TestFail "doctor failed: $($doctorResult.Err)" }
+    $doctor = $doctorResult.Out
     AssertContains $doctor 'missing  enabled  opencode' 'doctor'
     $r = Invoke-Hekate 'doctor' 'opencode'
     if ($r.Code -eq 0) { TestFail 'targeted missing doctor returned success' }
@@ -315,13 +344,18 @@ exit /b 2
     # --- item 5: worker identity / stop safety ------------------------------
     $r = Invoke-Hekate 'run' '--harness' 'pi' '--task' 'SLOW'
     if ($r.Code -ne 0) { TestFail "slow job submission failed: $($r.Err)" }
-    $slowJob = $r.Out.Trim()
+    $slowJob = RunId $r.Out
     $slowDir = Join-Path $Project ".workflow\runs\$slowJob"
     $waited = 0
     while ((Get-Content -LiteralPath (Join-Path $slowDir 'status') -Raw).Trim() -ne 'running' -and $waited -lt 50) {
         Start-Sleep -Milliseconds 100; $waited++
     }
-    if (-not (Test-Path (Join-Path $slowDir 'worker-token'))) { TestFail 'worker-token was not written at worker start' }
+    if (-not (Test-Path (Join-Path $slowDir 'worker-token'))) {
+        $workerErrorPath = Join-Path $slowDir 'worker-stderr.log'
+        $workerError = if (Test-Path $workerErrorPath) { Get-Content -LiteralPath $workerErrorPath -Raw } else { '<missing>' }
+        $slowStatus = (Get-Content -LiteralPath (Join-Path $slowDir 'status') -Raw).Trim()
+        TestFail "worker-token was not written at worker start (status=$slowStatus worker-stderr=$workerError)"
+    }
     $r = Invoke-Hekate 'stop' $slowJob
     if ($r.Code -ne 0) { TestFail "stop failed on an active, verified worker: $($r.Err)" }
     if ((Get-Content -LiteralPath (Join-Path $slowDir 'status') -Raw).Trim() -ne 'stopped') { TestFail 'stop did not persist state' }

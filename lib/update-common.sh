@@ -20,13 +20,38 @@ state_has_adapter() {
   grep -Eq "^[[:space:]]*-[[:space:]]*${adapter_name}$" "$adapter_state_file" 2>/dev/null
 }
 
-state_has_migration() {
-  migration_id="$1"
-  migration_state_file="$2"
+# Single reader for the migration ledger (schema.applied_migrations in
+# .workflow/state.yml). Prints one migration ID per line, in file order.
+#
+# The ledger is a YAML block sequence. YAML permits the sequence items to sit
+# either deeper than their key or at the *same* indentation as the key, and
+# both forms must be read identically:
+#
+#   applied_migrations:        applied_migrations:
+#     - 001-first              - 001-first
+#
+# List membership is therefore tracked by the indentation of the *items*, not
+# by "deeper than the key". The list ends at the first non-comment, non-blank
+# line that is either a mapping key (e.g. the `history:` sibling) or a
+# sequence item at a different indentation, so entries belonging to any other
+# key can never leak into the result. Only bare scalar IDs are emitted;
+# anything else (notably the `- {ran_at: ...}` maps written by the historical
+# ledger-contamination bug) is skipped without terminating the list.
+#
+# Keep byte-for-byte behavior in sync with Get-AawAppliedMigrations in
+# lib/update-common.ps1: both must accept and reject exactly the same input.
+applied_migrations_from_state() {
+  migration_state_file="$1"
 
-  [ -f "$migration_state_file" ] || return 1
+  [ -f "$migration_state_file" ] || return 0
 
-  awk -v migration_id="$migration_id" '
+  awk '
+    function indentation(line, prefix) {
+      prefix = line
+      sub(/[^[:space:]].*$/, "", prefix)
+      return length(prefix)
+    }
+
     /^[[:space:]]*applied_migrations:[[:space:]]*\[\][[:space:]]*$/ {
       in_list = 0
       next
@@ -34,26 +59,52 @@ state_has_migration() {
 
     /^[[:space:]]*applied_migrations:[[:space:]]*$/ {
       in_list = 1
+      key_indent = indentation($0)
+      item_indent = -1
       next
     }
 
-    in_list && /^[[:space:]]*-[[:space:]]*/ {
+    !in_list { next }
+
+    /^[[:space:]]*($|#)/ { next }
+
+    /^[[:space:]]*-/ {
+      line_indent = indentation($0)
+      if (item_indent < 0) {
+        # A dedented item cannot belong to this key.
+        if (line_indent < key_indent) {
+          in_list = 0
+          next
+        }
+        item_indent = line_indent
+      } else if (line_indent != item_indent) {
+        in_list = 0
+        next
+      }
+
       entry = $0
       sub(/^[[:space:]]*-[[:space:]]*/, "", entry)
-      if (entry == migration_id) {
-        found = 1
+      sub(/[[:space:]]+$/, "", entry)
+      if (entry ~ /^[[:alnum:]][[:alnum:]_.-]*$/) {
+        print entry
       }
       next
     }
 
-    in_list && $0 !~ /^[[:space:]]/ {
-      in_list = 0
-    }
-
-    END {
-      exit(found ? 0 : 1)
-    }
+    # Any other content (a mapping key such as `history:`) ends the list.
+    { in_list = 0 }
   ' "$migration_state_file"
+}
+
+state_has_migration() {
+  migration_id="$1"
+  migration_state_file="$2"
+
+  [ -f "$migration_state_file" ] || return 1
+  [ -n "$migration_id" ] || return 1
+
+  applied_migrations_from_state "$migration_state_file" \
+    | grep -qxF "$migration_id"
 }
 
 seed_applied_migrations_file() {
@@ -63,28 +114,7 @@ seed_applied_migrations_file() {
   : > "$migrations_output_file"
   [ -f "$migration_state_file" ] || return 0
 
-  awk '
-    /^[[:space:]]*applied_migrations:[[:space:]]*\[\][[:space:]]*$/ {
-      in_list = 0
-      next
-    }
-
-    /^[[:space:]]*applied_migrations:[[:space:]]*$/ {
-      in_list = 1
-      next
-    }
-
-    in_list && /^[[:space:]]*-[[:space:]]*/ {
-      entry = $0
-      sub(/^[[:space:]]*-[[:space:]]*/, "", entry)
-      print entry
-      next
-    }
-
-    in_list && $0 !~ /^[[:space:]]/ {
-      in_list = 0
-    }
-  ' "$migration_state_file" > "$migrations_output_file"
+  applied_migrations_from_state "$migration_state_file" > "$migrations_output_file"
 }
 
 append_unique_line() {

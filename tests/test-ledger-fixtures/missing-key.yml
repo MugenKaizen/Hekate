@@ -1,0 +1,6 @@
+adapters:
+  - claude
+schema:
+  state_version: 2
+  history:
+    - not-a-migration

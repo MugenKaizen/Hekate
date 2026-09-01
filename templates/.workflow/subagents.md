@@ -1,5 +1,9 @@
 # Native-subagent session policy
 
+> Legacy compatibility only. New installations do not ship a portable
+> native-subagent authorization plane. The active harness owns permission and
+> consent.
+
 This policy applies only when `status.yml → hekate.enabled` and
 `hekate.modules.native_subagents` are both `true`.
 

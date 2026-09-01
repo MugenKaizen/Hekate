@@ -10,17 +10,18 @@
 # Flags:
 #   --target=<path>     Root of the target project. Defaults to the current directory.
 #   --agents=<list>     Which adapters to lay down. Comma-separated:
-#                       claude,cursor,codex,copilot,gemini,aider.
+#                       claude,cursor,codex,copilot,gemini,aider,pi.
 #                       Defaults to all.
-#   --force             Overwrite existing files. Any pre-existing managed file
-#                       is backed up first into .workflow/backups/<UTC-timestamp>/
-#                       (same convention update-runner.sh uses). Prints a warning
-#                       listing what will be overwritten and, on a TTY, asks for
-#                       confirmation before writing anything.
+#   --legacy-workflow-files
+#                       Also install the opt-in legacy project-fact files
+#                       (stack.yml, architecture.yml, conventions.yml,
+#                       presets.yml). Omitted by default: project.yml owns
+#                       those facts and profile definitions ship with Hekate.
+#   --force             Transactionally reconcile an existing Hekate installation.
 #   --yes                Skip the --force confirmation prompt (required for
 #                       non-interactive/piped invocations combined with --force).
-#   --dry-run           Show what would be done (including what --force would
-#                       back up/overwrite) without making changes.
+#   --replace-unowned   Explicitly approve replacing unowned files during upgrade.
+#   --dry-run           Show what would be done without making changes.
 #   --source=<path>     Local copy of the repository (for installer development).
 #   --commit=<sha>      Full 40-character commit SHA. Required for downloads.
 #   --ref=<git-ref>     Source revision metadata for local --source development.
@@ -30,9 +31,11 @@ set -eu
 
 # --- defaults ------------------------------------------------------------
 TARGET="$(pwd)"
-AGENTS="claude,cursor,codex,copilot,gemini,aider"
+AGENTS="claude,cursor,codex,copilot,gemini,aider,pi"
 FORCE=0
 YES=0
+REPLACE_UNOWNED=0
+LEGACY_WORKFLOW_FILES=0
 DRY_RUN=0
 SOURCE=""
 REF=""
@@ -44,15 +47,17 @@ for arg in "$@"; do
   case "$arg" in
     --target=*)  TARGET="${arg#--target=}" ;;
     --agents=*)  AGENTS="${arg#--agents=}" ;;
+    --legacy-workflow-files) LEGACY_WORKFLOW_FILES=1 ;;
     --source=*)  SOURCE="${arg#--source=}" ;;
     --ref=*)     REF="${arg#--ref=}" ;;
     --commit=*)  COMMIT="${arg#--commit=}" ;;
     --repo=*)    REPO="${arg#--repo=}" ;;
     --force)     FORCE=1 ;;
     --yes)       YES=1 ;;
+    --replace-unowned) REPLACE_UNOWNED=1 ;;
     --dry-run)   DRY_RUN=1 ;;
     -h|--help)
-      sed -n '2,27p' "$0"
+      sed -n '2,28p' "$0"
       exit 0
       ;;
     *)
@@ -66,6 +71,33 @@ done
 log()  { printf '[hekate] %s\n' "$*"; }
 warn() { printf '[hekate] WARN: %s\n' "$*" >&2; }
 die()  { printf '[hekate] ERROR: %s\n' "$*" >&2; exit 1; }
+
+# An installation exists in either contract layout: the v1 contract records
+# ownership in install-state.json and authors config.yml, while legacy releases
+# are identified by their managed workflow files. Keying detection on one legacy
+# file alone would send a v1 installation down the fresh-install copy path.
+installation_exists() {
+  for marker in .workflow/install-state.json .workflow/config.yml .workflow/workflow.yml .workflow/presets.yml; do
+    if [ -f "$TARGET/$marker" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_upgrade() {
+  command -v node >/dev/null 2>&1 || die "transactional upgrade requires Node 20 or newer"
+  node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' || die "transactional upgrade requires Node 20 or newer"
+  runtime_root="$SRC_ROOT/distribution/runtime"
+  [ -f "$runtime_root/src/hekate-cli.mjs" ] || die "standalone transactional runtime is missing from the source snapshot"
+
+  set -- upgrade "--to=$INSTALLED_REV" --force "--target=$TARGET" "--source=$SRC_ROOT" "--adapters=$AGENTS"
+  [ "$LEGACY_WORKFLOW_FILES" -eq 0 ] || set -- "$@" --components=legacy-workflow-files
+  [ "$YES" -eq 0 ] || set -- "$@" --yes
+  [ "$REPLACE_UNOWNED" -eq 0 ] || set -- "$@" --replace-unowned
+  [ "$DRY_RUN" -eq 0 ] || set -- "$@" --dry-run
+  HEKATE_RECOVERY_RUNTIME_ROOT="$runtime_root" exec node "$runtime_root/src/hekate-cli.mjs" "$@"
+}
 
 write_state_file() {
   state_file="$TARGET/.workflow/state.yml"
@@ -106,7 +138,10 @@ write_state_file() {
     else
       printf '  applied_migrations: []\n'
     fi
-  } > "$state_file"
+  } > "$state_file.tmp.$$"
+  # An interrupted in-place write truncates the ledger and loses the applied
+  # migration list, so the file is replaced atomically instead.
+  mv -f "$state_file.tmp.$$" "$state_file"
 
   log "updated: $state_file"
 }
@@ -153,6 +188,16 @@ do_copy() {
   log "copied: $dst"
 }
 
+do_copy_authored() {
+  src="$1"
+  dst="$2"
+  if [ -e "$dst" ]; then
+    [ "$PLAN_MODE" -eq 1 ] || log "skip authored (exists): $dst"
+    return 0
+  fi
+  do_copy "$src" "$dst"
+}
+
 append_gitignore() {
   snippet="$1"
   gi="$TARGET/.gitignore"
@@ -187,11 +232,32 @@ has_agent() {
   esac
 }
 
+# An unknown adapter name silently installed core only, so a typo looked like a
+# successful install. The manifest rejects unknown adapters; so does this path.
+validate_agents() {
+  known="claude,cursor,codex,copilot,gemini,aider,pi"
+  saved_ifs="$IFS"
+  IFS=","
+  for requested in $AGENTS; do
+    [ -n "$requested" ] || continue
+    case ",$known," in
+      *",$requested,"*) ;;
+      *)
+        IFS="$saved_ifs"
+        die "unknown adapter: $requested (known: $known)"
+        ;;
+    esac
+  done
+  IFS="$saved_ifs"
+}
+validate_agents
+
 copy_skills_to() {
   skills_target="$1"
   for skill_dir in "$TPL/skills/"*/; do
     [ -e "$skill_dir/SKILL.md" ] || continue
     skill_name="$(basename "$skill_dir")"
+    [ "$skill_name" = "workflow" ] || continue
     do_copy "$skill_dir/SKILL.md" "$skills_target/$skill_name/SKILL.md"
   done
 }
@@ -241,8 +307,11 @@ fi
 TPL="$SRC_ROOT/templates"
 [ -d "$TPL" ] || die "templates dir missing: $TPL"
 [ -d "$TARGET" ] || die "target dir does not exist: $TARGET"
-if [ -f "$TARGET/.workflow/workflow.yml" ] && [ "$FORCE" -eq 0 ]; then
+if installation_exists && [ "$FORCE" -eq 0 ]; then
   die "Hekate is already installed in $TARGET; use update.sh (or rerun with --force to replace managed files)"
+fi
+if installation_exists && [ "$FORCE" -eq 1 ]; then
+  run_upgrade
 fi
 
 # lib/update-common.sh provides backup_file/prune_old_backups so --force
@@ -264,33 +333,30 @@ log "agents: $AGENTS"
 lay_down_files() {
   # --- core files ----------------------------------------------------------
   do_copy "$TPL/AGENTS.md"             "$TARGET/AGENTS.md"
-  do_copy "$TPL/.workflow/stack.yml"        "$TARGET/.workflow/stack.yml"
-  do_copy "$TPL/.workflow/architecture.yml" "$TARGET/.workflow/architecture.yml"
-  do_copy "$TPL/.workflow/conventions.yml"  "$TARGET/.workflow/conventions.yml"
+  do_copy_authored "$TPL/.workflow/config.yml"  "$TARGET/.workflow/config.yml"
+  do_copy_authored "$TPL/.workflow/project.yml" "$TARGET/.workflow/project.yml"
   do_copy "$TPL/.workflow/workflow.yml"     "$TARGET/.workflow/workflow.yml"
-  do_copy "$TPL/.workflow/presets.yml"      "$TARGET/.workflow/presets.yml"
-  do_copy "$TPL/.workflow/status.yml"       "$TARGET/.workflow/status.yml"
-  do_copy "$TPL/.workflow/orchestration.yml" "$TARGET/.workflow/orchestration.yml"
-  do_copy "$TPL/.workflow/session.local.yml" "$TARGET/.workflow/session.local.yml"
+  do_copy "$TPL/.workflow/status.yml"        "$TARGET/.workflow/status.yml"
+  # The legacy project-fact files duplicate project.yml, and presets.yml
+  # duplicates the profile registry that ships with Hekate, so they are opt-in.
+  if [ "$LEGACY_WORKFLOW_FILES" -eq 1 ]; then
+    do_copy "$TPL/.workflow/stack.yml"        "$TARGET/.workflow/stack.yml"
+    do_copy "$TPL/.workflow/architecture.yml" "$TARGET/.workflow/architecture.yml"
+    do_copy "$TPL/.workflow/conventions.yml"  "$TARGET/.workflow/conventions.yml"
+    do_copy "$TPL/.workflow/presets.yml"      "$TARGET/.workflow/presets.yml"
+  fi
   do_copy "$TPL/.workflow/bootstrap.md"     "$TARGET/.workflow/bootstrap.md"
-  do_copy "$TPL/.workflow/delegation.md"    "$TARGET/.workflow/delegation.md"
-  do_copy "$TPL/.workflow/subagents.md"     "$TARGET/.workflow/subagents.md"
   do_copy "$TPL/.workflow/history-format.md" "$TARGET/.workflow/history-format.md"
   do_copy "$TPL/.workflow/README.md"        "$TARGET/.workflow/README.md"
-  do_copy "$TPL/.workflow/bin/hekate-agent" "$TARGET/.workflow/bin/hekate-agent"
-  do_copy "$TPL/.workflow/bin/hekate-agent.ps1" "$TARGET/.workflow/bin/hekate-agent.ps1"
   do_copy "$TPL/.workflow/history/.gitkeep" "$TARGET/.workflow/history/.gitkeep"
 
   # --- adapters ------------------------------------------------------------
   if has_agent claude; then
     do_copy "$TPL/adapters/claude/CLAUDE.md" "$TARGET/CLAUDE.md"
-    for f in "$TPL/adapters/claude/commands/"*.md; do
+    for f in "$TPL/prompts/"*.md; do
       [ -e "$f" ] || continue
+      [ "$(basename "$f")" != "harness.md" ] || continue
       do_copy "$f" "$TARGET/.claude/commands/$(basename "$f")"
-    done
-    for f in "$TPL/adapters/claude/agents/"*.md; do
-      [ -e "$f" ] || continue
-      do_copy "$f" "$TARGET/.claude/agents/$(basename "$f")"
     done
     copy_skills_to "$TARGET/.claude/skills"
   fi
@@ -318,7 +384,14 @@ lay_down_files() {
     do_copy "$TPL/adapters/aider/.aider.conf.yml" "$TARGET/.aider.conf.yml"
   fi
 
-  if has_agent cursor || has_agent codex || has_agent copilot || has_agent gemini || has_agent aider; then
+  if has_agent pi; then
+    for f in "$TPL/prompts/"*.md; do
+      [ -e "$f" ] || continue
+      do_copy "$f" "$TARGET/.pi/prompts/$(basename "$f")"
+    done
+  fi
+
+  if has_agent cursor || has_agent codex || has_agent copilot || has_agent gemini || has_agent aider || has_agent pi; then
     copy_skills_to "$TARGET/.agents/skills"
   fi
 }

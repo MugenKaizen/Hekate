@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:lock:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "compatibility", "compiler", "inputs", "gate", "resolved_policy", "verification_commands", "extensions"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_schema", "authored_schemas"],
+      "properties": {
+        "contract_schema": { "const": 1 },
+        "authored_schemas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["config", "project"],
+          "properties": { "config": { "const": 1 }, "project": { "const": 1 } }
+        }
+      }
+    },
+    "compiler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": { "name": { "const": "@hekate/core" }, "version": { "type": "string", "minLength": 1 } }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "diagnostics"],
+      "properties": {
+        "state": { "enum": ["off", "workflow_disabled", "needs_configuration", "needs_confirmation", "ready"] },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      }
+    },
+    "resolved_policy": { "$ref": "#/$defs/resolvedPolicy" },
+    "verification_commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "run"],
+        "properties": {
+          "kind": { "enum": ["format", "lint", "test", "build", "validate"] },
+          "run": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config", "project"],
+      "properties": { "config": { "type": "object" }, "project": { "type": "object" } }
+    }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "file", "path"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^HKT[0-9]{3}$" },
+        "file": { "type": "string", "minLength": 1 },
+        "path": { "type": "string" }
+      }
+    },
+    "resolvedPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "tdd", "history", "policy", "enforcement"],
+      "properties": {
+        "profile": { "enum": ["fast", "medium", "full", "custom"] },
+        "tdd": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "enum": ["off", "prefer-test-first", "require-test-evidence"] } }
+        },
+        "history": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit_consent", "destructive_actions", "dependency_changes"],
+          "properties": {
+            "commit_consent": { "const": "explicit-request-only" },
+            "destructive_actions": { "const": "explicit-consent" },
+            "dependency_changes": { "const": "explicit-consent" }
+          }
+        },
+        "enforcement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["configuration", "destructive_actions", "dependency_changes", "generated_lock"],
+          "properties": {
+            "configuration": { "const": "block" },
+            "destructive_actions": { "const": "confirm" },
+            "dependency_changes": { "const": "confirm" },
+            "generated_lock": { "const": "protect" }
+          }
+        }
+      }
+    }
+  }
+}
