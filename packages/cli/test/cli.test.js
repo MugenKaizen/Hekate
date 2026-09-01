@@ -601,7 +601,7 @@ test("custom orchestration survives forced upgrade as private deprecated configu
 
 test("malformed non-critical extension and secrets survive the forced-upgrade protocol", async () => {
   const root = await historicalFixture("v0.2.0-beta.1", "hekate-cli-malformed-extension-");
-  const secret = "HKT_E2E_SECRET_4f89d7";
+  const secret = "not-a-real-private-token";
   const relative = ".workflow/orchestration.local.yml";
   const malformed = Buffer.from(`extensions:\n  private_token: ${secret}\n  broken: [\n`);
   await writeFile(path.join(root, relative), malformed);
