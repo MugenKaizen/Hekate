@@ -1,0 +1,22 @@
+schema_version: 1
+identity:
+  name: {state: unknown}
+  kind: {state: unknown}
+  description: {state: unknown}
+stack:
+  languages: {state: unknown}
+  frameworks: {state: unknown}
+  runtimes: {state: unknown}
+  dependencies: {state: unknown}
+verification:
+  format: {state: unknown}
+  lint: {state: unknown}
+  test: {state: unknown}
+  build: {state: unknown}
+  validate: {state: unknown}
+architecture:
+  references: {state: unknown}
+  constraints: {state: unknown}
+confirmation:
+  state: pending
+extensions: {}

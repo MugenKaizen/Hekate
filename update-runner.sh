@@ -12,6 +12,8 @@
 #                       existing installation pick up a newly supported
 #                       adapter without a full reinstall.
 #   --force             Overwrite locally edited managed files after confirmation.
+#   --yes               Skip the --force confirmation prompt for non-interactive use.
+#   --replace-unowned  Explicitly approve replacing unowned files during upgrade.
 #   --dry-run           Show what would be done without making changes.
 #   --rollback           Restore the most recent backup run (.workflow/backups/<ts>/)
 #                        over the current files. Refuses to act if no backup
@@ -33,6 +35,8 @@ COMMIT=""
 AGENTS=""
 DRY_RUN=0
 FORCE=0
+YES=0
+REPLACE_UNOWNED=0
 ROLLBACK=0
 ROLLBACK_NAME=""
 
@@ -45,10 +49,12 @@ for arg in "$@"; do
     --agents=*) AGENTS="${arg#--agents=}" ;;
     --dry-run)  DRY_RUN=1 ;;
     --force)    FORCE=1 ;;
+    --yes)      YES=1 ;;
+    --replace-unowned) REPLACE_UNOWNED=1 ;;
     --rollback=*) ROLLBACK=1; ROLLBACK_NAME="${arg#--rollback=}" ;;
     --rollback) ROLLBACK=1 ;;
     -h|--help)
-      sed -n '2,21p' "$0"
+      sed -n '2,22p' "$0"
       exit 0
       ;;
     *)
@@ -177,6 +183,7 @@ update_skills_to() {
   for skill_file in "$RUNNER_ROOT"/templates/skills/*/SKILL.md; do
     [ -e "$skill_file" ] || continue
     skill_name="$(basename "$(dirname "$skill_file")")"
+    [ "$skill_name" = "workflow" ] || continue
     update_template_file "$skills_target/$skill_name/SKILL.md" "skills/$skill_name/SKILL.md" "adapters/claude/skills/$skill_name/SKILL.md"
   done
 }
@@ -338,7 +345,10 @@ write_state_file() {
     fi
     printf '    - {ran_at: "%s", from_ref: "%s", to_ref: "%s", backup_dir: %s, migrations_applied: %s}\n' \
       "$timestamp" "$from_ref" "$install_ref" "$backup_dir_field" "$migrations_applied_field"
-  } > "$state_file"
+  } > "$state_file.tmp.$$"
+  # An interrupted in-place write truncates the ledger and loses both the
+  # applied migration list and installed_ref, so the file is replaced atomically.
+  mv -f "$state_file.tmp.$$" "$state_file"
 
   log "updated: $state_file"
 }
@@ -386,10 +396,39 @@ if [ "$ROLLBACK" -eq 1 ]; then
   exit 0
 fi
 
-[ -f "$TARGET/AGENTS.md" ] || die "target does not look like a workflow installation: $TARGET/AGENTS.md missing"
-[ -f "$TARGET/.workflow/workflow.yml" ] || die "target does not look like a workflow installation: .workflow/workflow.yml missing"
-[ -f "$TARGET/.workflow/presets.yml" ] || die "target does not look like a workflow installation: .workflow/presets.yml missing"
+# The frozen legacy path operates on the legacy managed files; the transactional
+# --force path reconciles either contract layout and must not demand them.
+if [ "$FORCE" -eq 1 ]; then
+  if [ ! -f "$TARGET/.workflow/install-state.json" ] && [ ! -f "$TARGET/.workflow/config.yml" ] \
+    && [ ! -f "$TARGET/.workflow/workflow.yml" ] && [ ! -f "$TARGET/.workflow/presets.yml" ]; then
+    die "target does not look like a Hekate installation: no .workflow/install-state.json, config.yml, workflow.yml, or presets.yml"
+  fi
+else
+  if [ -f "$TARGET/.workflow/install-state.json" ] || [ -f "$TARGET/.workflow/config.yml" ]; then
+    if [ ! -f "$TARGET/.workflow/workflow.yml" ] || [ ! -f "$TARGET/.workflow/presets.yml" ]; then
+      die "target uses the v1 contract layout; rerun with --force to update it transactionally"
+    fi
+  fi
+  [ -f "$TARGET/AGENTS.md" ] || die "target does not look like a workflow installation: $TARGET/AGENTS.md missing"
+  [ -f "$TARGET/.workflow/workflow.yml" ] || die "target does not look like a workflow installation: .workflow/workflow.yml missing"
+  [ -f "$TARGET/.workflow/presets.yml" ] || die "target does not look like a workflow installation: .workflow/presets.yml missing"
+fi
 [ -d "$RUNNER_ROOT/templates" ] || die "runner source is incomplete: templates/ missing"
+
+if [ "$FORCE" -eq 1 ]; then
+  command -v node >/dev/null 2>&1 || die "transactional upgrade requires Node 20 or newer"
+  node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' || die "transactional upgrade requires Node 20 or newer"
+  runtime_root="$RUNNER_ROOT/distribution/runtime"
+  [ -f "$runtime_root/src/hekate-cli.mjs" ] || die "standalone transactional runtime is missing from the source snapshot"
+  TARGET_RELEASE="${COMMIT:-$REF}"
+  set -- upgrade "--to=$TARGET_RELEASE" --force "--target=$TARGET" "--source=$RUNNER_ROOT"
+  [ -z "$AGENTS" ] || set -- "$@" "--adapters=$AGENTS"
+  [ "$YES" -eq 0 ] || set -- "$@" --yes
+  [ "$REPLACE_UNOWNED" -eq 0 ] || set -- "$@" --replace-unowned
+  [ "$DRY_RUN" -eq 0 ] || set -- "$@" --dry-run
+  rm -rf "$TMP_ROOT"
+  HEKATE_RECOVERY_RUNTIME_ROOT="$runtime_root" exec node "$runtime_root/src/hekate-cli.mjs" "$@"
+fi
 
 seed_applied_migrations_file "$STATE_FILE" "$APPLIED_MIGRATIONS_FILE"
 
@@ -432,13 +471,13 @@ run_migrations
 update_template_file "AGENTS.md" "AGENTS.md"
 update_root_readme
 update_template_file ".workflow/bootstrap.md" ".workflow/bootstrap.md"
-update_template_file ".workflow/delegation.md" ".workflow/delegation.md"
-update_template_file ".workflow/subagents.md" ".workflow/subagents.md"
 update_template_file ".workflow/history-format.md" ".workflow/history-format.md"
 update_template_file ".workflow/README.md" ".workflow/README.md"
-update_template_file ".workflow/orchestration.yml" ".workflow/orchestration.yml"
-update_template_file ".workflow/bin/hekate-agent" ".workflow/bin/hekate-agent"
-update_template_file ".workflow/bin/hekate-agent.ps1" ".workflow/bin/hekate-agent.ps1"
+[ ! -e "$TARGET/.workflow/delegation.md" ] || update_template_file ".workflow/delegation.md" ".workflow/delegation.md"
+[ ! -e "$TARGET/.workflow/subagents.md" ] || update_template_file ".workflow/subagents.md" ".workflow/subagents.md"
+[ ! -e "$TARGET/.workflow/orchestration.yml" ] || update_template_file ".workflow/orchestration.yml" ".workflow/orchestration.yml"
+[ ! -e "$TARGET/.workflow/bin/hekate-agent" ] || update_template_file ".workflow/bin/hekate-agent" ".workflow/bin/hekate-agent"
+[ ! -e "$TARGET/.workflow/bin/hekate-agent.ps1" ] || update_template_file ".workflow/bin/hekate-agent.ps1" ".workflow/bin/hekate-agent.ps1"
 if [ "$DRY_RUN" -eq 0 ] && [ -f "$TARGET/.workflow/bin/hekate-agent" ]; then
   chmod +x "$TARGET/.workflow/bin/hekate-agent"
 fi
@@ -448,10 +487,15 @@ if project_has_claude_adapter; then
 
   for command_file in "$RUNNER_ROOT"/templates/adapters/claude/commands/*.md; do
     [ -e "$command_file" ] || continue
+    if [ "$(basename "$command_file")" = "harness.md" ] \
+      && [ ! -e "$TARGET/.claude/commands/harness.md" ]; then
+      continue
+    fi
     update_template_file ".claude/commands/$(basename "$command_file")" "adapters/claude/commands/$(basename "$command_file")"
   done
   for agent_file in "$RUNNER_ROOT"/templates/adapters/claude/agents/*.md; do
     [ -e "$agent_file" ] || continue
+    [ -e "$TARGET/.claude/agents/$(basename "$agent_file")" ] || continue
     update_template_file ".claude/agents/$(basename "$agent_file")" "adapters/claude/agents/$(basename "$agent_file")"
   done
 

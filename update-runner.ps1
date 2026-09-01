@@ -6,6 +6,8 @@ param(
     [string]$Commit = '',
     [string]$Agents = '',
     [switch]$Force,
+    [switch]$Yes,
+    [switch]$ReplaceUnowned,
     [switch]$DryRun,
     [switch]$Rollback,
     [string]$RollbackName = '',
@@ -15,6 +17,7 @@ param(
 )
 
 Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
 
 foreach ($arg in $Rest) {
     if ($arg -like '--target=*') { $Target = $arg.Substring(9); continue }
@@ -23,6 +26,8 @@ foreach ($arg in $Rest) {
     if ($arg -like '--commit=*') { $Commit = $arg.Substring(9); continue }
     if ($arg -like '--agents=*') { $Agents = $arg.Substring(9); continue }
     if ($arg -eq '--force') { $Force = $true; continue }
+    if ($arg -eq '--yes') { $Yes = $true; continue }
+    if ($arg -eq '--replace-unowned') { $ReplaceUnowned = $true; continue }
     if ($arg -eq '--dry-run') { $DryRun = $true; continue }
     if ($arg -like '--rollback=*') { $Rollback = $true; $RollbackName = $arg.Substring(11); continue }
     if ($arg -eq '--rollback') { $Rollback = $true; continue }
@@ -44,6 +49,8 @@ Flags:
                      copilot,gemini,aider. Lets an existing installation pick
                      up a newly supported adapter without a full reinstall.
   -Force             Overwrite locally edited managed files after confirmation.
+  -Yes               Skip the confirmation prompt for non-interactive use.
+  -ReplaceUnowned    Explicitly approve replacing unowned files during upgrade.
   -DryRun            Show what would be done without making changes.
   -Rollback           Restore the most recent backup run (.workflow/backups/<ts>/)
                       over the current files.
@@ -66,6 +73,7 @@ $script:COMMIT = $Commit
 $script:AGENTS = $Agents
 $script:DRY_RUN = [bool]$DryRun
 $script:FORCE = [bool]$Force
+$script:REPLACE_UNOWNED = [bool]$ReplaceUnowned
 $script:ROLLBACK = [bool]$Rollback
 $script:ROLLBACK_NAME = $RollbackName
 $script:RUNNER_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -111,9 +119,9 @@ function Invoke-AawRollback {
         }
         $chosen = $script:ROLLBACK_NAME
     } else {
-        $runDirs = Get-ChildItem -LiteralPath $script:BACKUP_ROOT -Directory |
+        $runDirs = @(Get-ChildItem -LiteralPath $script:BACKUP_ROOT -Directory |
             Where-Object { $_.Name -match '^[0-9]{8}T[0-9]{6}Z$' } |
-            Sort-Object Name -Descending
+            Sort-Object Name -Descending)
         if ($runDirs.Count -lt 1) { Throw-Aaw "no backup runs found under $($script:BACKUP_ROOT)" }
         $chosen = $runDirs[0].Name
     }
@@ -121,7 +129,7 @@ function Invoke-AawRollback {
     $chosenDir = Join-Path $script:BACKUP_ROOT $chosen
     if (-not (Test-Path -LiteralPath $chosenDir)) { Throw-Aaw "backup run not found: $chosenDir" }
 
-    $files = Get-ChildItem -LiteralPath $chosenDir -Recurse -File
+    $files = @(Get-ChildItem -LiteralPath $chosenDir -Recurse -File -Force)
     if ($files.Count -lt 1) { Throw-Aaw "backup run is empty; nothing to restore: $chosenDir" }
 
     Write-AawLog "rolling back using backup run: $chosen ($($files.Count) file(s))"
@@ -185,7 +193,8 @@ function Update-AawTemplateFile {
 
 function Update-AawSkills {
     param([string]$DestinationRoot)
-    foreach ($skillDir in (Get-ChildItem -LiteralPath (Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') 'skills') -Directory)) {
+        foreach ($skillDir in (Get-ChildItem -LiteralPath (Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') 'skills') -Directory)) {
+            if ($skillDir.Name -ne 'workflow') { continue }
         if (Test-Path -LiteralPath (Join-AawPath $skillDir.FullName 'SKILL.md')) {
             Update-AawTemplateFile ($DestinationRoot + '/' + $skillDir.Name + '/SKILL.md') ('skills/' + $skillDir.Name + '/SKILL.md') ('adapters/claude/skills/' + $skillDir.Name + '/SKILL.md')
         }
@@ -274,7 +283,7 @@ function Write-AawStateFile {
     $lines.Add('schema:')
     $lines.Add('  state_version: 2')
     $applied = @()
-    if (Test-Path -LiteralPath $script:APPLIED_MIGRATIONS_FILE) { $applied = Get-Content -LiteralPath $script:APPLIED_MIGRATIONS_FILE }
+    if (Test-Path -LiteralPath $script:APPLIED_MIGRATIONS_FILE) { $applied = @(Get-Content -LiteralPath $script:APPLIED_MIGRATIONS_FILE) }
     if ($applied.Count -gt 0) {
         $lines.Add('  applied_migrations:')
         foreach ($migrationId in $applied) { if ($migrationId) { $lines.Add('    - ' + $migrationId) } }
@@ -286,7 +295,14 @@ function Write-AawStateFile {
     foreach ($historyLine in $oldHistoryLines) { $lines.Add($historyLine) }
     $lines.Add("    - {ran_at: `"$timestamp`", from_ref: `"$fromRef`", to_ref: `"$installRef`", backup_dir: $backupDirField, migrations_applied: $migrationsAppliedField}")
 
-    [System.IO.File]::WriteAllLines($stateFile, $lines.ToArray(), [System.Text.Encoding]::UTF8)
+    # An interrupted in-place write truncates the ledger, so the file is
+    # replaced atomically instead.
+    $stateTemp = "$stateFile.tmp"
+    [System.IO.File]::WriteAllLines($stateTemp, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    # PowerShell binds $null to an empty string here, which File.Replace rejects,
+    # so the "no backup file" argument must be a typed null.
+    if (Test-Path -LiteralPath $stateFile) { [System.IO.File]::Replace($stateTemp, $stateFile, [NullString]::Value) }
+    else { [System.IO.File]::Move($stateTemp, $stateFile) }
     Write-AawLog "updated: $stateFile"
 }
 
@@ -313,7 +329,7 @@ function Invoke-AawMigrations {
             continue
         }
         Write-AawLog "running migration: $migrationId"
-        & $migration.FullName
+        . $migration.FullName
         Add-AawUniqueLine $script:APPLIED_MIGRATIONS_FILE $migrationId
         Add-AawUniqueLine $script:NEW_MIGRATIONS_FILE $migrationId
         Write-AawLog "applied migration: $migrationId"
@@ -333,10 +349,41 @@ try {
         exit 0
     }
 
-    if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET 'AGENTS.md'))) { Throw-Aaw "target does not look like a workflow installation: $script:TARGET/AGENTS.md missing" }
-    if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/workflow.yml'))) { Throw-Aaw 'target does not look like a workflow installation: .workflow/workflow.yml missing' }
-    if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/presets.yml'))) { Throw-Aaw 'target does not look like a workflow installation: .workflow/presets.yml missing' }
+    # The frozen legacy path operates on the legacy managed files; the
+    # transactional -Force path reconciles either contract layout and must not
+    # demand them.
+    $hasV1 = (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/install-state.json')) -or (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/config.yml'))
+    $hasLegacy = (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/workflow.yml')) -and (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/presets.yml'))
+    if ($script:FORCE) {
+        if (-not $hasV1 -and -not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/workflow.yml')) -and -not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/presets.yml'))) {
+            Throw-Aaw 'target does not look like a Hekate installation: no .workflow/install-state.json, config.yml, workflow.yml, or presets.yml'
+        }
+    } else {
+        if ($hasV1 -and -not $hasLegacy) { Throw-Aaw 'target uses the v1 contract layout; rerun with -Force to update it transactionally' }
+        if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET 'AGENTS.md'))) { Throw-Aaw "target does not look like a workflow installation: $script:TARGET/AGENTS.md missing" }
+        if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/workflow.yml'))) { Throw-Aaw 'target does not look like a workflow installation: .workflow/workflow.yml missing' }
+        if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.workflow/presets.yml'))) { Throw-Aaw 'target does not look like a workflow installation: .workflow/presets.yml missing' }
+    }
     if (-not (Test-Path -LiteralPath (Join-Path $script:RUNNER_ROOT 'templates'))) { Throw-Aaw 'runner source is incomplete: templates/ missing' }
+
+    if ($script:FORCE) {
+        $node = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $node) { Throw-Aaw 'transactional upgrade requires Node 20 or newer' }
+        & $node.Source -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+        if ($LASTEXITCODE -ne 0) { Throw-Aaw 'transactional upgrade requires Node 20 or newer' }
+        $runtimeRoot = Join-AawPath $script:RUNNER_ROOT 'distribution/runtime'
+        $runtime = Join-AawPath $runtimeRoot 'src/hekate-cli.mjs'
+        if (-not (Test-Path -LiteralPath $runtime)) { Throw-Aaw 'standalone transactional runtime is missing from the source snapshot' }
+        $targetRelease = if ($script:COMMIT) { $script:COMMIT } else { $script:REF }
+        $upgradeArgs = @($runtime, 'upgrade', "--to=$targetRelease", '--force', "--target=$script:TARGET", "--source=$script:RUNNER_ROOT")
+        if ($script:AGENTS) { $upgradeArgs += "--adapters=$script:AGENTS" }
+        if ($Yes) { $upgradeArgs += '--yes' }
+        if ($script:REPLACE_UNOWNED) { $upgradeArgs += '--replace-unowned' }
+        if ($script:DRY_RUN) { $upgradeArgs += '--dry-run' }
+        $env:HEKATE_RECOVERY_RUNTIME_ROOT = $runtimeRoot
+        & $node.Source @upgradeArgs
+        exit $LASTEXITCODE
+    }
 
     foreach ($migrationId in (Get-AawAppliedMigrations $script:STATE_FILE)) { Add-AawUniqueLine $script:APPLIED_MIGRATIONS_FILE $migrationId }
 
@@ -370,20 +417,26 @@ try {
     Update-AawTemplateFile 'AGENTS.md' 'AGENTS.md'
     Update-AawRootReadme
     Update-AawTemplateFile '.workflow/bootstrap.md' '.workflow/bootstrap.md'
-    Update-AawTemplateFile '.workflow/delegation.md' '.workflow/delegation.md'
-    Update-AawTemplateFile '.workflow/subagents.md' '.workflow/subagents.md'
     Update-AawTemplateFile '.workflow/history-format.md' '.workflow/history-format.md'
     Update-AawTemplateFile '.workflow/README.md' '.workflow/README.md'
-    Update-AawTemplateFile '.workflow/orchestration.yml' '.workflow/orchestration.yml'
-    Update-AawTemplateFile '.workflow/bin/hekate-agent' '.workflow/bin/hekate-agent'
-    Update-AawTemplateFile '.workflow/bin/hekate-agent.ps1' '.workflow/bin/hekate-agent.ps1'
+    foreach ($legacyFile in @(
+        '.workflow/delegation.md', '.workflow/subagents.md',
+        '.workflow/orchestration.yml', '.workflow/bin/hekate-agent',
+        '.workflow/bin/hekate-agent.ps1'
+    )) {
+        if (Test-Path -LiteralPath (Join-AawPath $script:TARGET $legacyFile)) {
+            Update-AawTemplateFile $legacyFile $legacyFile
+        }
+    }
 
     if (Test-AawProjectHasClaudeAdapter) {
         Update-AawTemplateFile 'CLAUDE.md' 'adapters/claude/CLAUDE.md'
         foreach ($commandFile in (Get-ChildItem -LiteralPath (Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') 'adapters/claude/commands') -Filter '*.md')) {
+            if ($commandFile.Name -eq 'harness.md' -and -not (Test-Path -LiteralPath (Join-AawPath $script:TARGET '.claude/commands/harness.md'))) { continue }
             Update-AawTemplateFile ('.claude/commands/' + $commandFile.Name) ('adapters/claude/commands/' + $commandFile.Name)
         }
         foreach ($agentFile in (Get-ChildItem -LiteralPath (Join-AawPath (Join-Path $script:RUNNER_ROOT 'templates') 'adapters/claude/agents') -Filter '*.md')) {
+            if (-not (Test-Path -LiteralPath (Join-AawPath $script:TARGET ('.claude/agents/' + $agentFile.Name)))) { continue }
             Update-AawTemplateFile ('.claude/agents/' + $agentFile.Name) ('adapters/claude/agents/' + $agentFile.Name)
         }
         Update-AawSkills '.claude/skills'

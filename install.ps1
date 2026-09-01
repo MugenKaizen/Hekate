@@ -1,13 +1,15 @@
 [CmdletBinding()]
 param(
     [string]$Target = (Get-Location).Path,
-    [string]$Agents = 'claude,cursor,codex,copilot,gemini,aider',
+    [string]$Agents = 'claude,cursor,codex,copilot,gemini,aider,pi',
     [string]$Source = '',
     [string]$Ref = '',
     [string]$Commit = '',
     [string]$Repo = $(if ($env:HEKATE_REPO) { $env:HEKATE_REPO } else { 'MugenKaizen/Hekate' }),
     [switch]$Force,
+    [switch]$LegacyWorkflowFiles,
     [switch]$Yes,
+    [switch]$ReplaceUnowned,
     [switch]$DryRun,
     [switch]$Help,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -15,6 +17,7 @@ param(
 )
 
 Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
 
 $installTmp = ''
 
@@ -24,26 +27,65 @@ function Throw-Aaw { param([string]$Message) throw "[hekate] ERROR: $Message" }
 function Join-AawPath { param([string]$Root, [string]$RelativePath) $p = $Root; foreach ($part in ($RelativePath -split '[\\/]+')) { if ($part) { $p = Join-Path $p $part } }; $p }
 function Ensure-AawParentDirectory { param([string]$Path) $parent = Split-Path -Parent $Path; if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null } }
 
+# An installation exists in either contract layout: the v1 contract records
+# ownership in install-state.json and authors config.yml, while legacy releases
+# are identified by their managed workflow files. Keying detection on one legacy
+# file alone would send a v1 installation down the fresh-install copy path.
+# An unknown adapter name silently installed core only, so a typo looked like a
+# successful install. The manifest rejects unknown adapters; so does this path.
+function Assert-AawKnownAgents {
+    param([string]$Agents)
+    $known = @('claude', 'cursor', 'codex', 'copilot', 'gemini', 'aider', 'pi')
+    foreach ($requested in ($Agents -split ',')) {
+        if (-not $requested) { continue }
+        if ($known -notcontains $requested) { Throw-Aaw "unknown adapter: $requested (known: $($known -join ','))" }
+    }
+}
+
+function Test-AawInstallationExists {
+    param([string]$Root)
+    foreach ($marker in @('.workflow/install-state.json', '.workflow/config.yml', '.workflow/workflow.yml', '.workflow/presets.yml')) {
+        if (Test-Path -LiteralPath (Join-AawPath $Root $marker)) { return $true }
+    }
+    return $false
+}
+
+function Invoke-AawTransactionalUpgrade {
+    param([string]$SourceRoot)
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node) { Throw-Aaw 'transactional upgrade requires Node 20 or newer' }
+    & $node.Source -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+    if ($LASTEXITCODE -ne 0) { Throw-Aaw 'transactional upgrade requires Node 20 or newer' }
+    $runtimeRoot = Join-AawPath $SourceRoot 'distribution/runtime'
+    $runtime = Join-AawPath $runtimeRoot 'src/hekate-cli.mjs'
+    if (-not (Test-Path -LiteralPath $runtime)) { Throw-Aaw 'standalone transactional runtime is missing from the source snapshot' }
+    $arguments = @($runtime, 'upgrade', "--to=$script:INSTALLED_REV", '--force', "--target=$Target", "--source=$SourceRoot", "--adapters=$Agents")
+    if ($LegacyWorkflowFiles) { $arguments += '--components=legacy-workflow-files' }
+    if ($Yes) { $arguments += '--yes' }
+    if ($ReplaceUnowned) { $arguments += '--replace-unowned' }
+    if ($DryRun) { $arguments += '--dry-run' }
+    $env:HEKATE_RECOVERY_RUNTIME_ROOT = $runtimeRoot
+    & $node.Source @arguments
+    exit $LASTEXITCODE
+}
+
 function Show-AawHelp {
 @'
 ai_agent_workflow installer
 
 Usage:
-  powershell -ExecutionPolicy Bypass -File install.ps1 -Source . -Target . -Agents claude,cursor,codex,copilot,gemini,aider
+  powershell -ExecutionPolicy Bypass -File install.ps1 -Source . -Target . -Agents claude,cursor,codex,copilot,gemini,aider,pi
   $commit = '<full-40-character-sha>'
   & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/MugenKaizen/Hekate/$commit/install.ps1"))) -Commit $commit -Target .
 
 Flags:
   -Target <path>      Root of the target project. Defaults to the current directory.
-  -Agents <list>     Comma-separated: claude,cursor,codex,copilot,gemini,aider. Defaults to all.
-  -Force             Overwrite existing files. Any pre-existing managed file is backed
-                     up first into .workflow/backups/<UTC-timestamp>/ (same convention
-                     update-runner.ps1 uses). Prints a warning listing what will be
-                     overwritten and asks for confirmation before writing anything.
+  -Agents <list>     Comma-separated: claude,cursor,codex,copilot,gemini,aider,pi. Defaults to all.
+  -Force             Transactionally reconcile an existing Hekate installation.
   -Yes               Skip the -Force confirmation prompt (needed for non-interactive
                      invocations combined with -Force).
-  -DryRun            Show what would be done (including what -Force would back
-                     up/overwrite) without making changes.
+  -ReplaceUnowned    Explicitly approve replacing unowned files during upgrade.
+  -DryRun            Show what would be done without making changes.
   -Source <path>     Local copy of the repository (for installer development).
   -Commit <sha>      Full 40-character commit SHA. Required for downloads.
   -Ref <git-ref>     Source revision metadata for local -Source development.
@@ -59,7 +101,9 @@ foreach ($arg in $Rest) {
     if ($arg -like '--commit=*') { $Commit = $arg.Substring(9); continue }
     if ($arg -like '--repo=*') { $Repo = $arg.Substring(7); continue }
     if ($arg -eq '--force') { $Force = $true; continue }
+    if ($arg -eq '--legacy-workflow-files') { $LegacyWorkflowFiles = $true; continue }
     if ($arg -eq '--yes') { $Yes = $true; continue }
+    if ($arg -eq '--replace-unowned') { $ReplaceUnowned = $true; continue }
     if ($arg -eq '--dry-run') { $DryRun = $true; continue }
     if ($arg -eq '-h' -or $arg -eq '--help') { $Help = $true; continue }
     Throw-Aaw "unknown arg: $arg"
@@ -111,6 +155,15 @@ function Copy-AawInstallItem {
     Write-AawLog "copied: $Dst"
 }
 
+function Copy-AawAuthoredItem {
+    param([string]$Src, [string]$Dst)
+    if (Test-Path -LiteralPath $Dst) {
+        if (-not $script:PLAN_MODE) { Write-AawLog "skip authored (exists): $Dst" }
+        return
+    }
+    Copy-AawInstallItem $Src $Dst
+}
+
 function Test-AawAgent {
     param([string]$Name)
     return ((',' + $Agents + ',') -like "*,$Name,*")
@@ -120,7 +173,7 @@ function Copy-AawSkills {
     param([string]$SourceRoot, [string]$DestinationRoot)
     foreach ($dir in (Get-ChildItem -LiteralPath $SourceRoot -Directory)) {
         $skill = Join-AawPath $dir.FullName 'SKILL.md'
-        if (Test-Path -LiteralPath $skill) {
+        if ($dir.Name -eq 'workflow' -and (Test-Path -LiteralPath $skill)) {
             Copy-AawInstallItem $skill (Join-AawPath $DestinationRoot ($dir.Name + '/SKILL.md'))
         }
     }
@@ -176,7 +229,14 @@ function Write-AawInstallState {
     } else {
         $lines.Add('  applied_migrations: []')
     }
-    [System.IO.File]::WriteAllLines($stateFile, $lines.ToArray(), [System.Text.Encoding]::UTF8)
+    # An interrupted in-place write truncates the ledger, so the file is
+    # replaced atomically instead.
+    $stateTemp = "$stateFile.tmp"
+    [System.IO.File]::WriteAllLines($stateTemp, $lines.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    # PowerShell binds $null to an empty string here, which File.Replace rejects,
+    # so the "no backup file" argument must be a typed null.
+    if (Test-Path -LiteralPath $stateFile) { [System.IO.File]::Replace($stateTemp, $stateFile, [NullString]::Value) }
+    else { [System.IO.File]::Move($stateTemp, $stateFile) }
     Write-AawLog "updated: $stateFile"
 }
 
@@ -184,24 +244,31 @@ function Invoke-AawLayDownFiles {
     param([string]$Tpl)
 
     Copy-AawInstallItem (Join-AawPath $Tpl 'AGENTS.md') (Join-AawPath $Target 'AGENTS.md')
+    Copy-AawAuthoredItem (Join-AawPath $Tpl '.workflow/config.yml') (Join-AawPath $Target '.workflow/config.yml')
+    Copy-AawAuthoredItem (Join-AawPath $Tpl '.workflow/project.yml') (Join-AawPath $Target '.workflow/project.yml')
     foreach ($rel in @(
-        '.workflow/stack.yml', '.workflow/architecture.yml', '.workflow/conventions.yml',
-        '.workflow/workflow.yml', '.workflow/presets.yml', '.workflow/status.yml',
-        '.workflow/orchestration.yml', '.workflow/session.local.yml',
-        '.workflow/bootstrap.md', '.workflow/delegation.md', '.workflow/subagents.md',
+        '.workflow/workflow.yml', '.workflow/status.yml',
+        '.workflow/bootstrap.md',
         '.workflow/history-format.md', '.workflow/README.md',
-        '.workflow/bin/hekate-agent', '.workflow/bin/hekate-agent.ps1', '.workflow/history/.gitkeep'
+        '.workflow/history/.gitkeep'
     )) {
         Copy-AawInstallItem (Join-AawPath $Tpl $rel) (Join-AawPath $Target $rel)
+    }
+    # The legacy project-fact files duplicate project.yml, and presets.yml
+    # duplicates the profile registry that ships with Hekate, so they are opt-in.
+    if ($LegacyWorkflowFiles) {
+        foreach ($rel in @(
+            '.workflow/stack.yml', '.workflow/architecture.yml',
+            '.workflow/conventions.yml', '.workflow/presets.yml'
+        )) {
+            Copy-AawInstallItem (Join-AawPath $Tpl $rel) (Join-AawPath $Target $rel)
+        }
     }
 
     if (Test-AawAgent 'claude') {
         Copy-AawInstallItem (Join-AawPath $Tpl 'adapters/claude/CLAUDE.md') (Join-AawPath $Target 'CLAUDE.md')
-        foreach ($file in (Get-ChildItem -LiteralPath (Join-AawPath $Tpl 'adapters/claude/commands') -Filter '*.md')) {
+        foreach ($file in (Get-ChildItem -LiteralPath (Join-AawPath $Tpl 'prompts') -Filter '*.md')) {
             Copy-AawInstallItem $file.FullName (Join-AawPath $Target ('.claude/commands/' + $file.Name))
-        }
-        foreach ($file in (Get-ChildItem -LiteralPath (Join-AawPath $Tpl 'adapters/claude/agents') -Filter '*.md')) {
-            Copy-AawInstallItem $file.FullName (Join-AawPath $Target ('.claude/agents/' + $file.Name))
         }
         Copy-AawSkills (Join-AawPath $Tpl 'skills') (Join-AawPath $Target '.claude/skills')
     }
@@ -217,7 +284,12 @@ function Invoke-AawLayDownFiles {
     if (Test-AawAgent 'aider') {
         Copy-AawInstallItem (Join-AawPath $Tpl 'adapters/aider/.aider.conf.yml') (Join-AawPath $Target '.aider.conf.yml')
     }
-    if ((Test-AawAgent 'cursor') -or (Test-AawAgent 'codex') -or (Test-AawAgent 'copilot') -or (Test-AawAgent 'gemini') -or (Test-AawAgent 'aider')) {
+    if (Test-AawAgent 'pi') {
+        foreach ($file in (Get-ChildItem -LiteralPath (Join-AawPath $Tpl 'prompts') -Filter '*.md')) {
+            Copy-AawInstallItem $file.FullName (Join-AawPath $Target ('.pi/prompts/' + $file.Name))
+        }
+    }
+    if ((Test-AawAgent 'cursor') -or (Test-AawAgent 'codex') -or (Test-AawAgent 'copilot') -or (Test-AawAgent 'gemini') -or (Test-AawAgent 'aider') -or (Test-AawAgent 'pi')) {
         Copy-AawSkills (Join-AawPath $Tpl 'skills') (Join-AawPath $Target '.agents/skills')
     }
 }
@@ -247,8 +319,13 @@ try {
     $tpl = Join-Path $srcRoot 'templates'
     if (-not (Test-Path -LiteralPath $tpl)) { Throw-Aaw "templates dir missing: $tpl" }
     if (-not (Test-Path -LiteralPath $Target)) { Throw-Aaw "target dir does not exist: $Target" }
-    if ((Test-Path -LiteralPath (Join-AawPath $Target '.workflow/workflow.yml')) -and -not $Force) {
+    Assert-AawKnownAgents $Agents
+    $installed = Test-AawInstallationExists $Target
+    if ($installed -and -not $Force) {
         Throw-Aaw "Hekate is already installed in $Target; use update.ps1 (or rerun with -Force to replace managed files)"
+    }
+    if ($installed -and $Force) {
+        Invoke-AawTransactionalUpgrade $srcRoot
     }
 
     # lib/update-common.ps1 provides Backup-AawFile/Remove-AawOldBackupRuns so

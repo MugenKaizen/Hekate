@@ -1,73 +1,27 @@
-# Fast pre-flight index for AI agents.
-# Read this file at session start instead of loading every .workflow/*.yml.
-# It is rewritten after /init-workflow or after deliberate workflow config edits.
+# Legacy fast preflight index. Phase 2 replaces this authored mirror with a
+# deterministic generated status.lock.json.
 
 schema_version: 1
-
 initialized: false
-active_preset: null
 
 checks:
   required_files_present: false
   required_fields_filled: false
 
-hekate:
-  # One switch for all Hekate behavior. When false, agents stop here and use
-  # only their native/default behavior.
-  enabled: true
-  modules:
-    workflow: true
-    history: true
-    native_subagents: true
-    orchestration: true
-
-features:
-  require_analysis: true
-  require_plan: true
-  require_options: true
-  light_tdd: true
-  granular_commits: true
-  scope_control: true
-  three_branch_model: false
-
-orchestration:
-  enabled: false
-  default_harness: pi
-  default_profile: null
-  config: .workflow/orchestration.yml
-  runner: .workflow/bin/hekate-agent
-
-native_subagents:
-  policy: .workflow/session.local.yml
-  missing_or_invalid_mode: ask
+source:
+  workflow: .workflow/workflow.yml
 
 lazy_load:
-  # Each entry: read the file only when its condition applies. Never load
-  # these speculatively at session start — see AGENTS.md §1.1 for the
-  # authoritative condition text.
-  stack: .workflow/stack.yml # when choosing commands/deps/runtime/framework specifics
-  architecture: .workflow/architecture.yml # when changing module boundaries/layers/deps
-  conventions: .workflow/conventions.yml # when creating/editing code, tests, docs, commits
-  workflow_rules: .workflow/workflow.yml # when a process detail is missing from this file
-  presets: .workflow/presets.yml # only during initialization or preset changes
-  bootstrap: .workflow/bootstrap.md # only when pre-flight fails or /init-workflow is requested
-  orchestration: .workflow/orchestration.yml # only when its module and orchestration.enabled are true
-  delegation: .workflow/delegation.md # only when actually delegating to an external CLI harness
-  subagents: .workflow/subagents.md # only before the first native-subagent wave, or to change policy
-  history_format: .workflow/history-format.md # only when creating/updating a task history entry
+  project: .workflow/project.yml
+  config: .workflow/config.yml
+  bootstrap: .workflow/bootstrap.md
+  history_format: .workflow/history-format.md
 
 required_files:
-  - .workflow/stack.yml
-  - .workflow/architecture.yml
-  - .workflow/conventions.yml
+  - .workflow/config.yml
+  - .workflow/project.yml
   - .workflow/workflow.yml
-  - .workflow/presets.yml
 
 required_non_empty_fields:
-  stack.yml: [meta.project_name, meta.project_kind, languages]
-  architecture.yml: [style, layers]
-  conventions.yml: [code_style.formatter, naming.files, commits.style]
-
-notes:
-  - "When the workflow module is enabled: if initialized is not true, active_preset is null, or any check is false, read .workflow/bootstrap.md."
-  - "Do not read stack/architecture/conventions/workflow/presets at startup unless the fast check fails."
+  project.yml: [identity.name, identity.kind, stack.languages, verification.test]
+  config.yml: [workflow.profile]

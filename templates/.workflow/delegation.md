@@ -1,5 +1,8 @@
 # Cross-harness delegation
 
+> Legacy experimental component for existing `0.x` installations. It is not
+> installed by default and must not be used as an automatic fallback.
+
 Read this file only when `.workflow/status.yml → hekate.modules.orchestration`
 and `orchestration.enabled` are both `true` **and** the current task actually needs to delegate bounded work to a
 configured external CLI harness (Claude Code, pi, OpenCode, Codex, Gemini,

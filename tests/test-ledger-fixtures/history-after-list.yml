@@ -1,0 +1,13 @@
+schema:
+  state_version: 2
+  applied_migrations:
+  - 001-add-three-branch-model
+
+  # A comment inside the list does not terminate it.
+  - 002-add-status-index
+  history:
+  - {ran_at: "2026-08-30T00:00:00Z"}
+  - leaked-history-entry
+other:
+  items:
+    - not-a-migration

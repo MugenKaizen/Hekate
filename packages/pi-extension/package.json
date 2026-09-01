@@ -1,0 +1,41 @@
+{
+  "name": "@hekate/pi-extension",
+  "version": "0.3.0-beta.1",
+  "description": "Mechanical Hekate policy enforcement for Pi sessions",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MugenKaizen/Hekate.git",
+    "directory": "packages/pi-extension"
+  },
+  "homepage": "https://github.com/MugenKaizen/Hekate#readme",
+  "bugs": "https://github.com/MugenKaizen/Hekate/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./src/index.js"]
+  },
+  "exports": "./src/index.js",
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@hekate/core": "0.3.0-beta.1",
+    "@hekate/subagents": "0.3.0-beta.1",
+    "typebox": "1.3.7"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.4 <0.85.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

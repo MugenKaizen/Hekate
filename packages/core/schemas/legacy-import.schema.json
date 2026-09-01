@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:legacy-import:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_layout", "selected_adapters", "config", "project", "archived"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "source_layout": { "const": "legacy-0.x" },
+    "selected_adapters": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["aider", "claude", "codex", "copilot", "cursor", "gemini", "pi"] }
+    },
+    "config": { "$ref": "urn:hekate:schema:config:v1" },
+    "project": { "$ref": "urn:hekate:schema:project:v1" },
+    "archived": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

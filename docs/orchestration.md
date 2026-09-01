@@ -1,5 +1,11 @@
 # Cross-harness orchestration
 
+> **Legacy experimental component.** This controller is retained for existing
+> `0.x` installations and is not installed by default. It is not part of the
+> portable workflow authorization model and must never be used as an automatic
+> fallback when native delegation is unavailable or declined. Future
+> orchestration work targets the Hekate wrapper over Pi.
+
 Hekate can delegate long-running work from a primary user-facing agent to a
 different CLI harness without MCP or a resident service. The primary harness
 exclusively owns architecture, task decomposition, routing, subagent/harness

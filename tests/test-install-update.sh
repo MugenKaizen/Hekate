@@ -19,28 +19,34 @@ EOF
 chmod +x "$FAKEBIN/curl"
 
 # Network bootstraps require an immutable full commit SHA before any download.
-if "$ROOT/install.sh" --target="$PROJECT" >/dev/null 2>&1; then
+if "$ROOT/install.sh" --target="$PROJECT" --legacy-workflow-files >/dev/null 2>&1; then
   printf 'FAIL: remote installer accepted a missing commit\n' >&2
   exit 1
 fi
-if "$ROOT/install.sh" --target="$PROJECT" --commit=0123456 >/dev/null 2>&1; then
+if "$ROOT/install.sh" --target="$PROJECT" --legacy-workflow-files --commit=0123456 >/dev/null 2>&1; then
   printf 'FAIL: remote installer accepted a short commit\n' >&2
   exit 1
 fi
 CAPTURE_FILE="$CAPTURE_FILE" PATH="$FAKEBIN:$PATH" \
-  "$ROOT/install.sh" --target="$PROJECT" --commit="$FULL_COMMIT" >/dev/null 2>&1 || true
+  "$ROOT/install.sh" --target="$PROJECT" --legacy-workflow-files --commit="$FULL_COMMIT" >/dev/null 2>&1 || true
 grep -qxF "https://codeload.github.com/MugenKaizen/Hekate/tar.gz/$FULL_COMMIT" "$CAPTURE_FILE"
 rm -f "$CAPTURE_FILE"
 
-# Fresh install contains executable runners, adapters, and migration state.
-"$ROOT/install.sh" --source="$ROOT" --target="$PROJECT" --agents=claude --commit="$FULL_COMMIT" >/dev/null
-[ -x "$PROJECT/.workflow/bin/hekate-agent" ]
-[ -f "$PROJECT/.workflow/bin/hekate-agent.ps1" ]
-[ -f "$PROJECT/.workflow/session.local.yml" ]
-[ -f "$PROJECT/.claude/commands/harness.md" ]
+# Fresh install contains portable workflow files and no legacy orchestration or
+# portable native-subagent authorization plane.
+"$ROOT/install.sh" --source="$ROOT" --target="$PROJECT" --legacy-workflow-files --agents=claude --commit="$FULL_COMMIT" >/dev/null
+[ ! -e "$PROJECT/.workflow/bin/hekate-agent" ]
+[ ! -e "$PROJECT/.workflow/bin/hekate-agent.ps1" ]
+[ ! -e "$PROJECT/.workflow/session.local.yml" ]
+[ ! -e "$PROJECT/.workflow/orchestration.yml" ]
+[ ! -e "$PROJECT/.workflow/delegation.md" ]
+[ ! -e "$PROJECT/.workflow/subagents.md" ]
+[ ! -e "$PROJECT/.claude/commands/harness.md" ]
+[ ! -e "$PROJECT/.claude/agents/harness-orchestrator.md" ]
 [ -f "$PROJECT/.claude/skills/workflow/SKILL.md" ]
-[ -f "$PROJECT/.claude/skills/unslop/SKILL.md" ]
-grep -qxF '  mode: ask' "$PROJECT/.workflow/session.local.yml"
+[ ! -e "$PROJECT/.claude/skills/unslop/SKILL.md" ]
+[ -f "$PROJECT/.workflow/config.yml" ]
+[ -f "$PROJECT/.workflow/project.yml" ]
 grep -qxF '.workflow/session.local.yml' "$PROJECT/.gitignore"
 grep -qxF '    - 003-add-cross-harness-orchestration' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 004-add-routing-profiles' "$PROJECT/.workflow/state.yml"
@@ -48,15 +54,12 @@ grep -qxF '    - 005-add-session-subagent-policy' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 006-relocate-agent-skills' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 009-add-module-switches' "$PROJECT/.workflow/state.yml"
 grep -qxF "  installed_ref: $FULL_COMMIT" "$PROJECT/.workflow/state.yml"
-grep -qxF 'hekate:' "$PROJECT/.workflow/status.yml"
-grep -qxF '    workflow: true' "$PROJECT/.workflow/status.yml"
-grep -qxF '    history: true' "$PROJECT/.workflow/status.yml"
-grep -qxF '    native_subagents: true' "$PROJECT/.workflow/status.yml"
-grep -qxF '    orchestration: true' "$PROJECT/.workflow/status.yml"
+grep -qxF 'source:' "$PROJECT/.workflow/status.yml"
+grep -qxF '  workflow: .workflow/workflow.yml' "$PROJECT/.workflow/status.yml"
+grep -qxF '    mode: prefer-test-first # off | prefer-test-first | require-test-evidence' "$PROJECT/.workflow/workflow.yml"
+grep -qxF '    consent: explicit-request-only' "$PROJECT/.workflow/workflow.yml"
 
-# A fresh install lays down the lazily-loaded docs AGENTS.md now references.
-[ -f "$PROJECT/.workflow/delegation.md" ]
-[ -f "$PROJECT/.workflow/subagents.md" ]
+# A fresh install lays down the optional history reference.
 [ -f "$PROJECT/.workflow/history-format.md" ]
 
 if sh "$ROOT/update.sh" --target="$PROJECT" >/dev/null 2>&1; then
@@ -76,13 +79,28 @@ grep -qxF "  installed_ref: $FULL_COMMIT" "$PROJECT/.workflow/state.yml"
 # Agent Skills use the portable .agents path for non-Claude adapters.
 PORTABLE_PROJECT="$TMP/portable-project"
 mkdir -p "$PORTABLE_PROJECT"
-"$ROOT/install.sh" --source="$ROOT" --target="$PORTABLE_PROJECT" --agents=cursor,codex >/dev/null
+"$ROOT/install.sh" --source="$ROOT" --target="$PORTABLE_PROJECT" --legacy-workflow-files --agents=cursor,codex >/dev/null
 [ -f "$PORTABLE_PROJECT/.agents/skills/workflow/SKILL.md" ]
-[ -f "$PORTABLE_PROJECT/.agents/skills/unslop/SKILL.md" ]
+[ ! -e "$PORTABLE_PROJECT/.agents/skills/unslop/SKILL.md" ]
 [ ! -e "$PORTABLE_PROJECT/.claude/skills/workflow/SKILL.md" ]
-rm -f "$PORTABLE_PROJECT/.agents/skills/unslop/SKILL.md"
+rm -f "$PORTABLE_PROJECT/.agents/skills/workflow/SKILL.md"
 sh "$ROOT/update-runner.sh" --target="$PORTABLE_PROJECT" --ref=HEAD >/dev/null
-[ -f "$PORTABLE_PROJECT/.agents/skills/unslop/SKILL.md" ]
+[ -f "$PORTABLE_PROJECT/.agents/skills/workflow/SKILL.md" ]
+
+# Pi uses generic project prompts and never owns an existing settings file.
+PI_PROJECT="$TMP/pi-project"
+mkdir -p "$PI_PROJECT/.pi"
+printf '{"theme":"user-owned"}\n' > "$PI_PROJECT/.pi/settings.json"
+cp "$PI_PROJECT/.pi/settings.json" "$TMP/pi-settings.before"
+"$ROOT/install.sh" --source="$ROOT" --target="$PI_PROJECT" --agents=pi >/dev/null
+[ -f "$PI_PROJECT/.pi/prompts/analyze.md" ]
+[ -f "$PI_PROJECT/.pi/prompts/init-workflow.md" ]
+[ -f "$PI_PROJECT/.pi/prompts/plan.md" ]
+[ -f "$PI_PROJECT/.agents/skills/workflow/SKILL.md" ]
+cmp -s "$ROOT/templates/prompts/analyze.md" "$PI_PROJECT/.pi/prompts/analyze.md"
+cmp -s "$TMP/pi-settings.before" "$PI_PROJECT/.pi/settings.json"
+"$ROOT/install.sh" --source="$ROOT" --target="$PI_PROJECT" --agents=pi --force --yes >/dev/null
+cmp -s "$TMP/pi-settings.before" "$PI_PROJECT/.pi/settings.json"
 
 # Installing the copilot/gemini/aider adapters lays down real thin-pointer
 # files (not just README guidance) and shares portable Agent Skills with them.
@@ -98,8 +116,39 @@ grep -qxF '    - copilot' "$NEW_ADAPTERS_PROJECT/.workflow/state.yml"
 grep -qxF '    - gemini' "$NEW_ADAPTERS_PROJECT/.workflow/state.yml"
 grep -qxF '    - aider' "$NEW_ADAPTERS_PROJECT/.workflow/state.yml"
 
+# Applied-migration parsing stops at the next schema sibling and ignores
+# collection entries left by the historical ledger contamination bug.
+LEDGER_STATE="$TMP/ledger-state.yml"
+LEDGER_OUTPUT="$TMP/ledger-output.txt"
+cat > "$LEDGER_STATE" <<'EOF'
+schema:
+  state_version: 2
+  applied_migrations:
+    - 001-first
+    - 002_second.test
+    - {ran_at: "legacy-pollution"}
+
+    # A comment inside the list does not terminate it.
+  history:
+    - {ran_at: "2026-08-30T00:00:00Z"}
+other:
+  items:
+    - not-a-migration
+EOF
+(
+  . "$ROOT/lib/update-common.sh"
+  seed_applied_migrations_file "$LEDGER_STATE" "$LEDGER_OUTPUT"
+  state_has_migration 001-first "$LEDGER_STATE"
+  if state_has_migration not-a-migration "$LEDGER_STATE"; then
+    printf 'FAIL: migration parser consumed a sibling list\n' >&2
+    exit 1
+  fi
+)
+printf '001-first\n002_second.test\n' > "$TMP/expected-ledger.txt"
+cmp -s "$TMP/expected-ledger.txt" "$LEDGER_OUTPUT"
+
 # Installer re-entry must not mark skipped migrations as applied.
-if "$ROOT/install.sh" --source="$ROOT" --target="$PROJECT" --agents=claude >/dev/null 2>&1; then
+if "$ROOT/install.sh" --source="$ROOT" --target="$PROJECT" --legacy-workflow-files --agents=claude >/dev/null 2>&1; then
   printf 'FAIL: installer re-entry was accepted\n' >&2
   exit 1
 fi
@@ -115,10 +164,11 @@ awk '
 mv "$PROJECT/.workflow/status.yml.tmp" "$PROJECT/.workflow/status.yml"
 awk '$0 != "    - 003-add-cross-harness-orchestration" && $0 != "    - 004-add-routing-profiles" && $0 != "    - 005-add-session-subagent-policy" && $0 != "    - 006-relocate-agent-skills" { print }' "$PROJECT/.workflow/state.yml" > "$PROJECT/.workflow/state.yml.tmp"
 mv "$PROJECT/.workflow/state.yml.tmp" "$PROJECT/.workflow/state.yml"
-rm -f "$PROJECT/.workflow/orchestration.yml" "$PROJECT/.workflow/session.local.yml" "$PROJECT/.workflow/bin/hekate-agent" "$PROJECT/.workflow/bin/hekate-agent.ps1" "$PROJECT/.claude/commands/harness.md" "$PROJECT/.claude/agents/harness-orchestrator.md" "$PROJECT/.claude/skills/unslop/SKILL.md"
+rm -f "$PROJECT/.workflow/orchestration.yml" "$PROJECT/.workflow/session.local.yml" "$PROJECT/.workflow/bin/hekate-agent" "$PROJECT/.workflow/bin/hekate-agent.ps1" "$PROJECT/.claude/commands/harness.md" "$PROJECT/.claude/agents/harness-orchestrator.md" "$PROJECT/.claude/skills/workflow/SKILL.md"
 
 sh "$ROOT/update-runner.sh" --target="$PROJECT" --ref=HEAD >/dev/null
-[ -x "$PROJECT/.workflow/bin/hekate-agent" ]
+[ ! -e "$PROJECT/.workflow/bin/hekate-agent" ]
+[ ! -e "$PROJECT/.claude/commands/harness.md" ]
 grep -q '^orchestration:$' "$PROJECT/.workflow/status.yml"
 grep -qxF '  orchestration: .workflow/orchestration.yml' "$PROJECT/.workflow/status.yml"
 grep -qxF '    - 003-add-cross-harness-orchestration' "$PROJECT/.workflow/state.yml"
@@ -126,13 +176,11 @@ grep -qxF '    - 004-add-routing-profiles' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 005-add-session-subagent-policy' "$PROJECT/.workflow/state.yml"
 grep -qxF '    - 006-relocate-agent-skills' "$PROJECT/.workflow/state.yml"
 [ -f "$PROJECT/.workflow/session.local.yml" ]
-[ -f "$PROJECT/.claude/skills/unslop/SKILL.md" ]
+[ -f "$PROJECT/.claude/skills/workflow/SKILL.md" ]
 grep -qxF '  mode: ask' "$PROJECT/.workflow/session.local.yml"
 grep -qxF 'native_subagents:' "$PROJECT/.workflow/status.yml"
 grep -qxF '  policy: .workflow/session.local.yml' "$PROJECT/.workflow/status.yml"
-grep -qxF 'schema_version: 2' "$PROJECT/.workflow/orchestration.yml"
-grep -qxF 'default_profile: null' "$PROJECT/.workflow/orchestration.yml"
-grep -qxF 'profiles:' "$PROJECT/.workflow/orchestration.yml"
+[ ! -e "$PROJECT/.workflow/orchestration.yml" ]
 grep -qxF '  default_profile: null' "$PROJECT/.workflow/status.yml"
 
 # Migration 004 preserves custom config, supports dry-run, and creates backups.
@@ -147,9 +195,16 @@ awk '
   { print }
   END { print "custom_extension: preserve-me" }
 ' "$ROOT/templates/.workflow/orchestration.yml" > "$MIGRATION_PROJECT/.workflow/orchestration.yml"
-# Remove both the target field and its usual insertion anchor to exercise the
-# migration's conservative end-of-block fallback.
-awk '$0 !~ /^  default_(harness|profile):/' "$ROOT/templates/.workflow/status.yml" > "$MIGRATION_PROJECT/.workflow/status.yml"
+# Use a historical status shape: frozen migrations are compatibility inputs,
+# not the current portable contract.
+cat > "$MIGRATION_PROJECT/.workflow/status.yml" <<'EOF'
+schema_version: 1
+orchestration:
+  enabled: false
+  config: .workflow/orchestration.yml
+lazy_load:
+  stack: .workflow/stack.yml
+EOF
 cp "$MIGRATION_PROJECT/.workflow/orchestration.yml" "$TMP/config.before"
 cp "$MIGRATION_PROJECT/.workflow/status.yml" "$TMP/status.before"
 : > "$TMP/migration-work/backed.txt"
@@ -323,41 +378,67 @@ TARGET="$DOCS_MIGRATION_PROJECT" RUNNER_ROOT="$ROOT" TMP_ROOT="$TMP/docs-migrati
   DRY_RUN=0 sh "$ROOT/migrations/008-add-lazy-load-docs.sh" >/dev/null
 grep -qxF 'custom' "$DOCS_MIGRATION_PROJECT/.workflow/subagents.md"
 
-# --force backs up a user-edited stack.yml before overwriting it, warns and
-# asks for confirmation, and --dry-run reports the same plan without writing.
+# Existing-install --force delegates to the ownership-aware transaction engine.
 FORCE_PROJECT="$TMP/force-project"
 mkdir -p "$FORCE_PROJECT"
-"$ROOT/install.sh" --source="$ROOT" --target="$FORCE_PROJECT" --agents=claude --commit="$FULL_COMMIT" >/dev/null
+"$ROOT/install.sh" --source="$ROOT" --target="$FORCE_PROJECT" --legacy-workflow-files --agents=claude --commit="$FULL_COMMIT" >/dev/null
 printf 'meta:\n  project_name: "my-custom-project"\n' > "$FORCE_PROJECT/.workflow/stack.yml"
+printf '\n# project-owned\n' >> "$FORCE_PROJECT/.workflow/config.yml"
+printf '\n# project-facts-owned\n' >> "$FORCE_PROJECT/.workflow/project.yml"
+cp "$FORCE_PROJECT/.workflow/stack.yml" "$TMP/stack.before-force"
+cp "$FORCE_PROJECT/.workflow/config.yml" "$TMP/config.before-force"
+cp "$FORCE_PROJECT/.workflow/project.yml" "$TMP/project.before-force"
 
 FORCE_DRY_OUTPUT="$TMP/force-dry-output.txt"
-"$ROOT/install.sh" --source="$ROOT" --target="$FORCE_PROJECT" --agents=claude --commit="$FULL_COMMIT" \
-  --force --dry-run > "$FORCE_DRY_OUTPUT" 2>&1
-grep -q 'WARN: --force enabled' "$FORCE_DRY_OUTPUT"
-grep -q 'would back up:.*stack.yml' "$FORCE_DRY_OUTPUT"
+"$ROOT/install.sh" --source="$ROOT" --target="$FORCE_PROJECT" --legacy-workflow-files --agents=claude --commit="$FULL_COMMIT" \
+  --force --replace-unowned --dry-run > "$FORCE_DRY_OUTPUT" 2>&1
+grep -q 'transaction:' "$FORCE_DRY_OUTPUT"
+grep -q 'dry run; no files changed' "$FORCE_DRY_OUTPUT"
 grep -qxF 'meta:' "$FORCE_PROJECT/.workflow/stack.yml"
 grep -qxF '  project_name: "my-custom-project"' "$FORCE_PROJECT/.workflow/stack.yml"
-[ ! -d "$FORCE_PROJECT/.workflow/backups" ]
+cmp -s "$TMP/config.before-force" "$FORCE_PROJECT/.workflow/config.yml"
+cmp -s "$TMP/project.before-force" "$FORCE_PROJECT/.workflow/project.yml"
+[ ! -d "$FORCE_PROJECT/.workflow/transactions" ]
 
 # --force without --yes and without a TTY refuses to proceed.
-if "$ROOT/install.sh" --source="$ROOT" --target="$FORCE_PROJECT" --agents=claude --commit="$FULL_COMMIT" \
+if "$ROOT/install.sh" --source="$ROOT" --target="$FORCE_PROJECT" --legacy-workflow-files --agents=claude --commit="$FULL_COMMIT" \
   --force < /dev/null > /dev/null 2>&1; then
   printf 'FAIL: --force proceeded without confirmation or --yes\n' >&2
   exit 1
 fi
 grep -qxF '  project_name: "my-custom-project"' "$FORCE_PROJECT/.workflow/stack.yml"
 
-# --force --yes proceeds non-interactively, backing up the edited file first.
-"$ROOT/install.sh" --source="$ROOT" --target="$FORCE_PROJECT" --agents=claude --commit="$FULL_COMMIT" \
+# --force --yes proceeds non-interactively and commits a recoverable journal.
+NO_NPM_BIN="$TMP/no-npm-bin"
+mkdir -p "$NO_NPM_BIN"
+printf '#!/usr/bin/env sh\nexit 97\n' > "$NO_NPM_BIN/npm"
+chmod +x "$NO_NPM_BIN/npm"
+PATH="$NO_NPM_BIN:$PATH" "$ROOT/install.sh" --source="$ROOT" --target="$FORCE_PROJECT" --legacy-workflow-files --agents=claude --commit="$FULL_COMMIT" \
   --force --yes >/dev/null 2>/dev/null
-FORCE_BACKUP_DIR=$(find "$FORCE_PROJECT/.workflow/backups" -mindepth 1 -maxdepth 1 -type d | head -n1)
-[ -n "$FORCE_BACKUP_DIR" ]
-[ -f "$FORCE_BACKUP_DIR/.workflow/stack.yml" ]
-grep -qxF '  project_name: "my-custom-project"' "$FORCE_BACKUP_DIR/.workflow/stack.yml"
-if grep -qxF '  project_name: "my-custom-project"' "$FORCE_PROJECT/.workflow/stack.yml"; then
-  printf 'FAIL: --force --yes did not overwrite the managed file\n' >&2
+cmp -s "$TMP/stack.before-force" "$FORCE_PROJECT/.workflow/stack.yml"
+cmp -s "$TMP/config.before-force" "$FORCE_PROJECT/.workflow/config.yml"
+cmp -s "$TMP/project.before-force" "$FORCE_PROJECT/.workflow/project.yml"
+[ -f "$FORCE_PROJECT/.workflow/install-state.json" ]
+FORCE_JOURNAL=$(find "$FORCE_PROJECT/.workflow/transactions" -mindepth 2 -maxdepth 2 -name operation-journal.json | head -n1)
+[ -n "$FORCE_JOURNAL" ]
+grep -q '"status":"committed"' "$FORCE_JOURNAL"
+FORCE_TRANSACTION_ID=$(basename "$(dirname "$FORCE_JOURNAL")")
+FORCE_RECOVERY_RUNTIME="$FORCE_PROJECT/.workflow/transactions/$FORCE_TRANSACTION_ID/runtime/src/hekate-cli.mjs"
+[ -x "$FORCE_RECOVERY_RUNTIME" ]
+node "$FORCE_RECOVERY_RUNTIME" rollback --transaction="$FORCE_TRANSACTION_ID" --dry-run --json --target="$FORCE_PROJECT" >/dev/null
+
+# The update bootstrap delegates --force to the same transaction engine.
+UPDATE_FORCE_DRY_OUTPUT="$TMP/update-force-dry-output.txt"
+if ! sh "$ROOT/update.sh" --source="$ROOT" --target="$FORCE_PROJECT" --agents=claude --commit="$FULL_COMMIT" \
+  --force --dry-run > "$UPDATE_FORCE_DRY_OUTPUT" 2>&1; then
+  cat "$UPDATE_FORCE_DRY_OUTPUT" >&2
   exit 1
 fi
+grep -q 'transaction:' "$UPDATE_FORCE_DRY_OUTPUT"
+RUNNER_FORCE_DRY_OUTPUT="$TMP/runner-force-dry-output.txt"
+sh "$ROOT/update-runner.sh" --target="$FORCE_PROJECT" --agents=claude --ref=HEAD \
+  --force --replace-unowned --dry-run > "$RUNNER_FORCE_DRY_OUTPUT" 2>&1
+grep -q 'transaction:' "$RUNNER_FORCE_DRY_OUTPUT"
 
 # prune_old_backups keeps only the 5 most recent timestamped backup run
 # directories, leaving non-timestamped/legacy entries untouched.
@@ -386,7 +467,7 @@ remaining_runs=$(find "$PRUNE_PROJECT/.workflow/backups" -mindepth 1 -maxdepth 1
 # .workflow/state.yml, which reverts the applied-migrations ledger too.
 ROLLBACK_PROJECT="$TMP/rollback-project"
 mkdir -p "$ROLLBACK_PROJECT"
-"$ROOT/install.sh" --source="$ROOT" --target="$ROLLBACK_PROJECT" --agents=claude --commit="$FULL_COMMIT" >/dev/null
+"$ROOT/install.sh" --source="$ROOT" --target="$ROLLBACK_PROJECT" --legacy-workflow-files --agents=claude --commit="$FULL_COMMIT" >/dev/null
 
 # A project with no backup runs yet refuses to roll back.
 if sh "$ROOT/update-runner.sh" --target="$ROLLBACK_PROJECT" --ref=HEAD --rollback >/dev/null 2>&1; then
@@ -403,10 +484,25 @@ if cmp -s "$TMP/state.after-run1" "$TMP/state.after-run2"; then
   printf 'FAIL: expected state.yml to change on the second update run\n' >&2
   exit 1
 fi
+awk '
+  /^  applied_migrations:$/ { in_list=1; next }
+  in_list && /^  [^ ]/ { in_list=0 }
+  in_list && /\{ran_at:/ { found=1 }
+  END { exit(found ? 0 : 1) }
+' "$ROLLBACK_PROJECT/.workflow/state.yml" && {
+  printf 'FAIL: update history contaminated applied migrations\n' >&2
+  exit 1
+}
+
+# Rollback restores every captured path, not only installation state.
+LATEST_ROLLBACK_BACKUP=$(find "$ROLLBACK_PROJECT/.workflow/backups" -mindepth 1 -maxdepth 1 -type d -name '20*T*Z' | sort -r | head -n1)
+printf 'AGENTS backup sentinel\n' > "$LATEST_ROLLBACK_BACKUP/AGENTS.md"
+printf 'AGENTS live sentinel\n' > "$ROLLBACK_PROJECT/AGENTS.md"
 
 # --rollback --dry-run reports the plan without restoring anything.
 sh "$ROOT/update-runner.sh" --target="$ROLLBACK_PROJECT" --ref=HEAD --rollback --dry-run >/dev/null
 cmp -s "$ROLLBACK_PROJECT/.workflow/state.yml" "$TMP/state.after-run2"
+grep -qxF 'AGENTS live sentinel' "$ROLLBACK_PROJECT/AGENTS.md"
 
 # A malformed --rollback=<name> is rejected.
 if sh "$ROOT/update-runner.sh" --target="$ROLLBACK_PROJECT" --ref=HEAD --rollback=not-a-timestamp >/dev/null 2>&1; then
@@ -416,5 +512,61 @@ fi
 
 sh "$ROOT/update-runner.sh" --target="$ROLLBACK_PROJECT" --ref=HEAD --rollback >/dev/null
 cmp -s "$ROLLBACK_PROJECT/.workflow/state.yml" "$TMP/state.after-run1"
+grep -qxF 'AGENTS backup sentinel' "$ROLLBACK_PROJECT/AGENTS.md"
+
+# An unknown adapter name is rejected instead of silently installing core only.
+UNKNOWN_PROJECT="$TMP/unknown-adapter"
+mkdir -p "$UNKNOWN_PROJECT"
+if "$ROOT/install.sh" --source="$ROOT" --target="$UNKNOWN_PROJECT" --agents=clod --commit="$FULL_COMMIT" >/dev/null 2>&1; then
+  printf 'FAIL: installer accepted an unknown adapter\n' >&2
+  exit 1
+fi
+[ ! -e "$UNKNOWN_PROJECT/AGENTS.md" ]
+
+# A v1 contract installation carries no legacy workflow.yml. It must still be
+# recognized as an existing installation rather than overwritten by the
+# fresh-install copy path.
+V1_PROJECT="$TMP/v1-layout"
+mkdir -p "$V1_PROJECT/.workflow"
+cp "$ROOT/templates/.workflow/config.yml" "$V1_PROJECT/.workflow/config.yml"
+cp "$ROOT/templates/.workflow/project.yml" "$V1_PROJECT/.workflow/project.yml"
+printf 'authored by the project\n' > "$V1_PROJECT/AGENTS.md"
+cp "$V1_PROJECT/AGENTS.md" "$TMP/v1-agents.expected"
+if "$ROOT/install.sh" --source="$ROOT" --target="$V1_PROJECT" --agents=claude --commit="$FULL_COMMIT" >/dev/null 2>&1; then
+  printf 'FAIL: installer treated a v1 installation as a fresh target\n' >&2
+  exit 1
+fi
+cmp -s "$V1_PROJECT/AGENTS.md" "$TMP/v1-agents.expected"
+[ ! -e "$V1_PROJECT/.workflow/workflow.yml" ]
+
+# The frozen legacy update path must refuse a v1 layout instead of failing with
+# a missing-file error, and must not modify it.
+if sh "$ROOT/update-runner.sh" --target="$V1_PROJECT" --ref=HEAD >/dev/null 2>&1; then
+  printf 'FAIL: legacy update runner accepted a v1 installation\n' >&2
+  exit 1
+fi
+sh "$ROOT/update-runner.sh" --target="$V1_PROJECT" --ref=HEAD 2>&1 | grep -q 'rerun with --force'
+cmp -s "$V1_PROJECT/AGENTS.md" "$TMP/v1-agents.expected"
+
+# The legacy project-fact files and the preset registry are opt-in: a default
+# installation records its profile selection in config.yml and its facts in
+# project.yml instead of carrying duplicates.
+DEFAULT_PROJECT="$TMP/default-payload"
+mkdir -p "$DEFAULT_PROJECT"
+"$ROOT/install.sh" --source="$ROOT" --target="$DEFAULT_PROJECT" --agents=claude --commit="$FULL_COMMIT" >/dev/null
+[ -f "$DEFAULT_PROJECT/.workflow/config.yml" ]
+[ -f "$DEFAULT_PROJECT/.workflow/project.yml" ]
+[ -f "$DEFAULT_PROJECT/.workflow/workflow.yml" ]
+[ -f "$DEFAULT_PROJECT/.workflow/status.yml" ]
+[ ! -e "$DEFAULT_PROJECT/.workflow/stack.yml" ]
+[ ! -e "$DEFAULT_PROJECT/.workflow/architecture.yml" ]
+[ ! -e "$DEFAULT_PROJECT/.workflow/conventions.yml" ]
+[ ! -e "$DEFAULT_PROJECT/.workflow/presets.yml" ]
+
+OPTIN_PROJECT="$TMP/optin-payload"
+mkdir -p "$OPTIN_PROJECT"
+"$ROOT/install.sh" --source="$ROOT" --target="$OPTIN_PROJECT" --agents=claude --legacy-workflow-files --commit="$FULL_COMMIT" >/dev/null
+[ -f "$OPTIN_PROJECT/.workflow/stack.yml" ]
+[ -f "$OPTIN_PROJECT/.workflow/presets.yml" ]
 
 printf 'ok: install/update smoke tests passed\n'

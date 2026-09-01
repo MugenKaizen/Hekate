@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:install-manifest:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_version", "adapters", "components", "assets"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_version": {"type": "integer", "minimum": 1},
+    "adapters": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}, "uniqueItems": true},
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "default", "adapters"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "default": {"type": "boolean"},
+          "adapters": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}, "uniqueItems": true}
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "component", "source", "destination", "ownership", "update_strategy", "remove_strategy", "mode"],
+        "properties": {
+          "asset_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "component": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "source": {"type": ["string", "null"]},
+          "destination": {"type": "string", "minLength": 1},
+          "ownership": {"enum": ["template-managed", "project-seed", "local-seed", "generated", "shared-merge", "user-owned"]},
+          "update_strategy": {"enum": ["three-way", "typed-migration", "create-only", "regenerate", "structured-merge", "preserve"]},
+          "remove_strategy": {"enum": ["preserve", "archive", "remove-if-unmodified", "remove-if-generated", "remove-contribution"]},
+          "mode": {"type": "string", "pattern": "^0[0-7]{3}$"}
+        }
+      }
+    }
+  }
+}

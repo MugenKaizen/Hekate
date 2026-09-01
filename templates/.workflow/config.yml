@@ -1,0 +1,17 @@
+schema_version: 1
+hekate:
+  enabled: true
+workflow:
+  enabled: true
+  profile: medium
+  overrides: {}
+policy:
+  commit_consent: explicit-request-only
+  destructive_actions: explicit-consent
+  dependency_changes: explicit-consent
+enforcement:
+  configuration: block
+  destructive_actions: confirm
+  dependency_changes: confirm
+  generated_lock: protect
+extensions: {}

@@ -1,0 +1,44 @@
+{
+  "name": "@hekate/cli",
+  "version": "0.3.0-beta.1",
+  "description": "Deterministic Hekate CLI, transactional upgrades, and Pi agent wrapper",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MugenKaizen/Hekate.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/MugenKaizen/Hekate#readme",
+  "bugs": "https://github.com/MugenKaizen/Hekate/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "hekate": "./bin/hekate.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "scripts",
+    "payload"
+  ],
+  "scripts": {
+    "prepack": "node ./scripts/prepare-payload.js"
+  },
+  "dependencies": {
+    "@hekate/core": "0.3.0-beta.1",
+    "@hekate/pi-extension": "0.3.0-beta.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.4 <0.85.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

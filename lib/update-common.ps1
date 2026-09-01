@@ -43,7 +43,7 @@ function Read-AawText {
 function Write-AawText {
     param([string]$Path, [string[]]$Lines)
     Ensure-AawParentDirectory $Path
-    [System.IO.File]::WriteAllLines($Path, $Lines, [System.Text.Encoding]::UTF8)
+    [System.IO.File]::WriteAllLines($Path, $Lines, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Test-AawSameFile {
@@ -74,12 +74,34 @@ function Test-AawStateHasAdapter {
     return $false
 }
 
+# Single reader for the migration ledger (schema.applied_migrations in
+# .workflow/state.yml). Returns the migration IDs in file order.
+#
+# The ledger is a YAML block sequence. YAML permits the sequence items to sit
+# either deeper than their key or at the *same* indentation as the key, and
+# both forms must be read identically:
+#
+#   applied_migrations:        applied_migrations:
+#     - 001-first              - 001-first
+#
+# List membership is therefore tracked by the indentation of the *items*, not
+# by "deeper than the key". The list ends at the first non-comment, non-blank
+# line that is either a mapping key (e.g. the `history:` sibling) or a
+# sequence item at a different indentation, so entries belonging to any other
+# key can never leak into the result. Only bare scalar IDs are returned;
+# anything else (notably the `- {ran_at: ...}` maps written by the historical
+# ledger-contamination bug) is skipped without terminating the list.
+#
+# Keep byte-for-byte behavior in sync with applied_migrations_from_state in
+# lib/update-common.sh: both must accept and reject exactly the same input.
 function Get-AawAppliedMigrations {
     param([string]$StateFilePath)
     $items = New-Object System.Collections.Generic.List[string]
     if (-not (Test-Path -LiteralPath $StateFilePath)) { return $items.ToArray() }
 
     $inList = $false
+    $keyIndent = 0
+    $itemIndent = -1
     foreach ($line in (Get-Content -LiteralPath $StateFilePath)) {
         if ($line -match '^\s*applied_migrations:\s*\[\]\s*$') {
             $inList = $false
@@ -87,15 +109,47 @@ function Get-AawAppliedMigrations {
         }
         if ($line -match '^\s*applied_migrations:\s*$') {
             $inList = $true
+            $keyIndent = $line.Length - $line.TrimStart().Length
+            $itemIndent = -1
             continue
         }
-        if ($inList -and $line -match '^\s*-\s*(.+?)\s*$') {
-            $items.Add($matches[1])
+        if (-not $inList) { continue }
+        if ($line -match '^\s*(?:#.*)?$') { continue }
+
+        if ($line -match '^\s*-') {
+            $lineIndent = $line.Length - $line.TrimStart().Length
+            if ($itemIndent -lt 0) {
+                # A dedented item cannot belong to this key.
+                if ($lineIndent -lt $keyIndent) {
+                    $inList = $false
+                    continue
+                }
+                $itemIndent = $lineIndent
+            } elseif ($lineIndent -ne $itemIndent) {
+                $inList = $false
+                continue
+            }
+
+            if ($line -match '^\s*-\s*([A-Za-z0-9][A-Za-z0-9_.-]*)\s*$') {
+                $items.Add($matches[1])
+            }
             continue
         }
-        if ($inList -and $line -match '^\S') { $inList = $false }
+
+        # Any other content (a mapping key such as `history:`) ends the list.
+        $inList = $false
     }
     return $items.ToArray()
+}
+
+function Test-AawStateHasMigration {
+    param([string]$MigrationId, [string]$StateFilePath)
+    if (-not (Test-Path -LiteralPath $StateFilePath)) { return $false }
+    if ([string]::IsNullOrEmpty($MigrationId)) { return $false }
+    foreach ($id in (Get-AawAppliedMigrations $StateFilePath)) {
+        if ($id -ceq $MigrationId) { return $true }
+    }
+    return $false
 }
 
 function Add-AawUniqueLine {
@@ -185,9 +239,9 @@ function Remove-AawOldBackupRuns {
     if (-not (Test-Path -LiteralPath $script:BACKUP_ROOT)) { return }
     if ($script:DRY_RUN) { return }
 
-    $runDirs = Get-ChildItem -LiteralPath $script:BACKUP_ROOT -Directory |
+    $runDirs = @(Get-ChildItem -LiteralPath $script:BACKUP_ROOT -Directory |
         Where-Object { $_.Name -match '^[0-9]{8}T[0-9]{6}Z$' } |
-        Sort-Object Name -Descending
+        Sort-Object Name -Descending)
     if ($runDirs.Count -le $Keep) { return }
 
     foreach ($dir in ($runDirs | Select-Object -Skip $Keep)) {
@@ -274,7 +328,7 @@ function Expand-AawZipball {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
     Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
-    $dirs = Get-ChildItem -LiteralPath $dest -Directory
+    $dirs = @(Get-ChildItem -LiteralPath $dest -Directory)
     if ($dirs.Count -lt 1) { Throw-Aaw "could not locate extracted repo in $dest" }
     return $dirs[0].FullName
 }

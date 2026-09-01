@@ -1,0 +1,6 @@
+schema:
+  state_version: 2
+  applied_migrations: []
+  history:
+    - {ran_at: "2026-08-30T00:00:00Z"}
+    - not-a-migration

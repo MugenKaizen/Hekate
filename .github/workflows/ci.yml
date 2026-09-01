@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  posix:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Run core and CLI tests
+        run: npm test
+      - name: Run POSIX suites
+        run: ./tests/run.sh
+      - name: Check whitespace
+        run: git diff --check
+
+  windows-powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Run core and CLI tests
+        shell: powershell
+        run: npm ci; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm test
+      - name: Run Windows PowerShell suites
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\run.ps1
+      - name: Run cross-wrapper interoperability
+        shell: bash
+        run: sh tests/test-wrapper-interop.sh powershell.exe
+
+  package-smoke:
+    strategy:
+      matrix:
+        include:
+          - node-version: 20
+            pi-runtime: "0"
+          - node-version: 22.19
+            pi-runtime: "1"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Test installed workspace tarballs
+        run: npm run test:package
+        env:
+          HEKATE_PACKAGE_SMOKE_PI: ${{ matrix.pi-runtime }}
+
+  bun:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install Bun dependencies
+        run: bun install --frozen-lockfile
+      - name: Verify standalone runtime artifact
+        run: npm run build:runtime && git diff --exit-code -- distribution/runtime
+      - name: Run core and CLI tests with Bun
+        run: bun run test:bun
+      - name: Test Bun-installed workspace tarballs
+        run: bun run test:package:bun
+        env:
+          HEKATE_PACKAGE_SMOKE_PI: "1"
+      - name: Check whitespace
+        run: git diff --check

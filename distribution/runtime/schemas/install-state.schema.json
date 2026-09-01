@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hekate:schema:install-state:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_version", "source_release", "selected_components", "selected_adapters", "assets"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_version": {"type": "integer", "minimum": 1},
+    "source_release": {"type": "string", "minLength": 1},
+    "selected_components": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "selected_adapters": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "destination", "ownership", "installed_source_hash", "destination_hash"],
+        "properties": {
+          "asset_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "destination": {"type": "string", "minLength": 1},
+          "ownership": {"enum": ["template-managed", "project-seed", "local-seed", "generated", "shared-merge", "user-owned"]},
+          "installed_source_hash": {"anyOf": [{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, {"type": "null"}]},
+          "destination_hash": {"anyOf": [{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, {"type": "null"}]}
+        }
+      }
+    }
+  }
+}

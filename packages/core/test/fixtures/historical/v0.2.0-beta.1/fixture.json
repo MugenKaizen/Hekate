@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "release": "v0.2.0-beta.1",
+  "commit": "ee5ba34f0de706c94789057d1d8e5363db431af3",
+  "files": [
+    ".workflow/workflow.yml",
+    ".workflow/stack.yml",
+    ".workflow/architecture.yml",
+    ".workflow/conventions.yml",
+    ".workflow/presets.yml",
+    ".workflow/status.yml",
+    ".workflow/orchestration.yml",
+    ".workflow/session.local.yml"
+  ]
+}

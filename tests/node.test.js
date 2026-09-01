@@ -1,0 +1,12 @@
+import "../packages/core/test/core.test.js";
+import "../packages/core/test/policy.test.js";
+import "../packages/core/test/historical.test.js";
+import "../packages/core/test/resolver.test.js";
+import "../packages/core/test/transaction.test.js";
+import "../packages/core/test/verification.test.js";
+import "../packages/core/test/context-budget.test.js";
+import "../packages/pi-extension/test/extension.test.js";
+import "../packages/cli/test/agent-runner.test.js";
+import "../packages/subagents/test/subagents.test.js";
+import "../packages/cli/test/cli.test.js";
+import "../packages/cli/test/package.test.js";
